@@ -23,7 +23,15 @@ EEG_BANDS: Dict[str, Tuple[float, float]] = {
     "Beta":  (13.0, 30.0),
     "Gamma": (30.0, 100.0),
 }
-
+st.set_page_config(
+    page_title="EEG — FFT Spectra",
+    layout="wide",
+    menu_items={
+        "Get help": None,       # hides the "Get help" link
+        "Report a Bug": None,   # hides the "Report a bug" link
+        "About": "EEG Spectra Dashboard"
+    }
+)
 # -------------------------------------------------------
 # Sidebar
 # -------------------------------------------------------
