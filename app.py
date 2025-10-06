@@ -44,26 +44,26 @@ EEG_BANDS: Dict[str, Tuple[float, float]] = {
 # -------------------------------------------------------
 st.sidebar.header("Upload & Cuts")
 
-uploaded = st.sidebar.file_uploader("Upload CSV (2 columns: timestamp, signal[µV])", type=["csv"])
+uploaded = st.sidebar.file_uploader("Upload CSV", type=["csv"])
 
 # --- Preprocessing ---
 st.sidebar.markdown("### Pre-processing")
 do_notch = st.sidebar.checkbox("Apply 50 Hz notch", value=True,
-                               help="IIR notch at 50 Hz (Q=30).")
+                               help="Use to filter out powerline noise in europe")
 do_bandpass = st.sidebar.checkbox("Apply 0.5–45 Hz band-pass", value=True,
                                   help="4th-order Butterworth. Typical EEG passband.")
 st.sidebar.caption("Filters are applied before FFT and (if enabled) Welch PSD.")
 
 # --- Raw preview ---
 show_time_preview = st.sidebar.checkbox("Show raw/preprocessed time-series preview", value=False)
-preview_secs = st.sidebar.number_input("Preview seconds", min_value=0.0, value=10.0, step=1.0)
+preview_secs = st.sidebar.number_input("Preview seconds", min_value=0.0, value=180.0, step=10.0)
 
 # --- FFT window ---
 win_choice = st.sidebar.selectbox(
     "FFT window",
     ["None (rectangular)", "Hann (recommended)"],
     index=1,
-    help="Hann reduces leakage. Coherent-gain corrected so peaks keep correct µV amplitude."
+    help="Hann reduces leakage between bands."
 )
 
 # --- Frequency plotting ---
@@ -78,7 +78,7 @@ st.sidebar.markdown("---")
 st.sidebar.subheader("Fixed-Length Cuts")
 cut_len_s = st.sidebar.number_input(
     "Cut every X seconds",
-    min_value=0.1, value=5.0, step=0.5,
+    min_value=0.1, value=60.0, step=10,
     help="Back-to-back cuts (no overlap)."
 )
 include_last_partial = st.sidebar.checkbox(
