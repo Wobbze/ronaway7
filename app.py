@@ -87,9 +87,9 @@ include_last_partial = st.sidebar.checkbox(
 )
 
 st.sidebar.markdown("---")
-st.sidebar.subheader("Welch PSD (optional)")
+st.sidebar.subheader("Welch PSD")
 do_welch = st.sidebar.checkbox("Also compute Welch PSD", value=True,
-                               help="Computes PSD for full signal AND for each cut.")
+                               help="Computes PSD.")
 welch_secs = st.sidebar.number_input("Welch window length (s)", min_value=1.0, value=4.0, step=1.0)
 welch_overlap = st.sidebar.slider("Welch overlap (%)", min_value=0, max_value=90, value=50, step=5)
 
@@ -252,10 +252,10 @@ def band_power_table(f: np.ndarray, Pxx: np.ndarray) -> pd.DataFrame:
 # -------------------------------------------------------
 # Main
 # -------------------------------------------------------
-st.title("🧠 EEG — FFT Amplitude Spectrum (µV)")
+st.title("🧠 EEG — FFT Spectra (µV)")
 
 if uploaded is None:
-    st.info("Upload your CSV to begin (two columns: timestamp, signal[µV]).")
+    st.info("Upload your CSV to begin (columns: timestamp, signal[µV]).")
     st.stop()
 
 # Read CSV
@@ -400,7 +400,3 @@ else:
                 key=f"dl_psd_cut_{i}"
             )
 
-st.caption(
-    "Per-cut Welch PSD uses the same window/overlap settings, computed inside each cut. "
-    "If a cut is shorter than the Welch window, the window is clamped to the cut length for that cut."
-)
