@@ -1,18 +1,3 @@
-# app.py
-# -------------------------------------------------------
-# EEG Fourier Dashboard (Amplitude Spectrum + optional Preprocessing & Welch PSD)
-# - fs = 250 Hz
-# - Column 1: timestamp (steps of 1/250 s). If ticks or ms, auto-convert to seconds.
-# - Column 2: EEG signal in microvolts (µV)
-# - MAIN VIEW: Amplitude Spectrum (one-sided FFT, µV)
-# - CUTS: "Cut every X seconds" (no overlap) -> Amplitude Spectrum for each cut
-# - Band-annotated x-axis (Delta/Theta/Alpha/Beta/Gamma)
-# - NEW:
-#   * Optional 50 Hz notch (Q=30) and 0.5–45 Hz band-pass (4th-order)
-#   * Optional Welch PSD (µV²/Hz) for full signal AND per-cut (with CSV + band-power table)
-#   * Hann window (coherent-gain corrected) still available
-# -------------------------------------------------------
-
 from __future__ import annotations
 
 import numpy as np
