@@ -78,7 +78,7 @@ st.sidebar.markdown("---")
 st.sidebar.subheader("Fixed-Length Cuts")
 cut_len_s = st.sidebar.number_input(
     "Cut every X seconds",
-    min_value=0.1, value=60.0, step=10,
+    min_value=0.1, value=60.0, step=10.0,
     help="Back-to-back cuts (no overlap)."
 )
 include_last_partial = st.sidebar.checkbox(
