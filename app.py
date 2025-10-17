@@ -371,7 +371,7 @@ def ui_slider_row(
     right = f'<div class="qbar-badge">{badge}</div>' if show_badge else ""
     st.markdown(f'<div class="qbar-row"><div class="qbar-title">{title}</div>{right}</div>', unsafe_allow_html=True)
     fig = build_slider_figure(title, value, axis_min, axis_max, green, yellow, red, ticks, unit)
-    st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
+    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
     if show_note:
         note_key = f"note_{key or title}"
         txt = st.text_area("Add note", key=note_key, label_visibility="collapsed", placeholder="Type your observation…")
@@ -406,7 +406,7 @@ def gauge_figure(
     return fig
 
 def ui_gauge(title: str, score01: Optional[float], invert: bool=False):
-    st.plotly_chart(gauge_figure(title, score01, invert), width="stretch")
+    st.plotly_chart(gauge_figure(title, score01, invert), use_container_width=True)
 
 def make_export_basename(raw: Optional[str]) -> str:
     if not raw:
@@ -518,7 +518,7 @@ with tab_upload:
                             "fs":r["fs"], "n":len(r["signal"])} for r in chosen_rows]) \
                 .sort_values(["channel","condition","file"])
     with st.expander("View selected file index"):
-        st.dataframe(idx_df, width='stretch')
+        st.dataframe(idx_df, use_container_width=True)
 
 # ──────────────────────────────────────────────────────────────────────────────
 # 2) ARTIFACT CLEANING & PREPROCESSING
@@ -605,7 +605,7 @@ bands_df = pd.DataFrame.from_records(records).sort_values(["channel","condition"
 with tab_metrics:
     st.markdown('<div class="app-card">', unsafe_allow_html=True)
     st.markdown('<div class="card-title">📊 Band powers & ratios</div>', unsafe_allow_html=True)
-    st.dataframe(bands_df, width='stretch')
+    st.dataframe(bands_df, use_container_width=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
 # Derived metrics & helpers
@@ -694,7 +694,7 @@ derived_df = pd.DataFrame([
 with tab_metrics:
     st.markdown('<div class="app-card">', unsafe_allow_html=True)
     st.markdown('<div class="card-title">🧮 Derived metrics</div>', unsafe_allow_html=True)
-    st.dataframe(derived_df, width='stretch')
+    st.dataframe(derived_df, use_container_width=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
 # KPI tiles
@@ -725,7 +725,7 @@ with tab_qc:
     if qc_df.empty:
         st.info("No QC available.")
     else:
-        st.dataframe(qc_df, width='stretch')
+        st.dataframe(qc_df, use_container_width=True)
         low = qc_df[(qc_df["epochs_total"] > 0) & (qc_df["epochs_good"] < MIN_GOOD_EPOCHS)]
         if not low.empty:
             st.warning(f"{len(low)} file(s) have fewer than {MIN_GOOD_EPOCHS} good epochs. Consider longer/cleaner recordings.")
@@ -880,7 +880,7 @@ with tab_psd:
             fig.update_layout(margin=dict(l=10,r=10,t=30,b=10),
                               title=f"{sel_channel} — {cond}",
                               xaxis_title="Frequency (Hz)", yaxis_title="PSD (µV²/Hz)")
-            st.plotly_chart(fig, width="stretch")
+            st.plotly_chart(fig, use_container_width=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
 # ──────────────────────────────────────────────────────────────────────────────
