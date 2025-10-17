@@ -7,4 +7,4 @@ plotly>=5.20
 
 # PDF export
 reportlab>=4.0
-kaleido
+kaleido==1.0.0rc0
