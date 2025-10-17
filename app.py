@@ -25,9 +25,6 @@ try:
 except Exception:
     KALEIDO_OK = False
 
-st.caption(f"Kaleido import check: {'✅' if KALEIDO_OK else '❌'}")
-
-
 # ──────────────────────────────────────────────────────────────────────────────
 # APP META / WARNING HYGIENE
 # ──────────────────────────────────────────────────────────────────────────────
