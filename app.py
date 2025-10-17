@@ -17,6 +17,17 @@ import plotly.graph_objects as go
 import plotly.io as pio
 from scipy.signal import welch, detrend, savgol_filter, butter, filtfilt, iirnotch
 
+import plotly.io as pio
+
+try:
+    _ = pio.kaleido.scope
+    KALEIDO_OK = True
+except Exception:
+    KALEIDO_OK = False
+
+st.caption(f"Kaleido import check: {'✅' if KALEIDO_OK else '❌'}")
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # APP META / WARNING HYGIENE
 # ──────────────────────────────────────────────────────────────────────────────
