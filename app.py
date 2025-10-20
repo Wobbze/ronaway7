@@ -17,8 +17,7 @@ import plotly.graph_objects as go
 import plotly.io as pio
 from scipy.signal import welch, detrend, savgol_filter, butter, filtfilt, iirnotch
 
-import plotly.io as pio
-
+# Try kaleido probe once
 try:
     _ = pio.kaleido.scope
     KALEIDO_OK = True
@@ -29,10 +28,10 @@ except Exception:
 # APP META / WARNING HYGIENE
 # ──────────────────────────────────────────────────────────────────────────────
 APP_NAME     = "NeurobIQs EEG Dashboard"
-APP_VERSION  = "1.7.0"
+APP_VERSION  = "1.7.1"
 BUILD_STAMP  = datetime.now().strftime("%Y-%m-%d %H:%M")
 
-# Silence noisy warnings (helps JSON-based runners and keeps logs clean)
+# Silence noisy warnings
 SILENCE_WARNINGS = True
 if SILENCE_WARNINGS:
     warnings.filterwarnings("ignore", category=DeprecationWarning)
@@ -98,20 +97,20 @@ BANDS = {
     "Delta": (1.0, 4.0),
     "Theta": (4.0, 8.0),
     "Alpha": (8.0, 12.0),
-    "Beta":  (13.0, 21.0),   # TBR denominator
-    "LowBeta": (12.0, 15.0), # Theta/Low-Beta
+    "Beta":  (13.0, 21.0),    # TBR denominator
+    "LowBeta": (12.0, 15.0),  # Theta/Low-Beta
     "Beta15_20": (15.0, 20.0),
     "HiBeta": (20.0, 30.0),
 }
 
-# Robust trapezoid integrator (no deprecation warnings)
+# Robust trapezoid integrator
 try:
     from numpy import trapezoid as _trapint
 except Exception:
     try:
         from scipy.integrate import trapezoid as _trapint
     except Exception:
-        from numpy import trapz as _trapint  # last-resort fallback
+        from numpy import trapz as _trapint
 
 # ──────────────────────────────────────────────────────────────────────────────
 # SIDEBAR
@@ -229,7 +228,7 @@ def apply_bandpass(x: np.ndarray, fs: float, low: float, high: float) -> np.ndar
 
 def apply_notch(x: np.ndarray, fs: float, freq: float, Q: float = 30.0) -> np.ndarray:
     try:
-        if freq >= 0.5*fs:  # guard if chosen notch is above Nyquist
+        if freq >= 0.5*fs:
             return x
         b, a = iirnotch(w0=freq, Q=Q, fs=fs)
         return filtfilt(b, a, x)
@@ -260,7 +259,6 @@ def artifact_clean(
 ) -> Tuple[np.ndarray, Dict]:
     """
     Returns (x_clean concatenated good epochs, qc dict).
-    QC includes total/good epochs and reason counts.
     """
     n = len(x)
     if n < 8:
@@ -283,7 +281,7 @@ def artifact_clean(
         if np.max(np.abs(ep - np.median(ep))) > thr_amp:
             reasons["amp"] += 1
             continue
-        # quick PSD
+        # quick PSD on epoch
         f_ep, pxx_ep = safe_welch_psd(ep, fs, N_PERSEG, N_OVERLAP)
         def pwr(lo, hi): return band_power(f_ep, pxx_ep, lo, hi)
         alpha = max(pwr(8, 12), 1e-12)
@@ -489,7 +487,7 @@ with tab_upload:
 
     # Show completeness
     need = [(c, "EyesOpen") for c in ["Cz","F3","F4","O1"]] + [(c, "EyesClosed") for c in ["Cz","F3","F4","O1"]]
-    have = {}
+    have: Dict[Tuple[str,str], List[Dict]] = {}
     for r in data_rows:
         have.setdefault((r["channel"], r["condition"]), []).append(r)
 
@@ -538,7 +536,7 @@ for r in chosen_rows:
     x = r["signal"].astype(float)
     fs = float(r["fs"])
 
-    # Optional filtering (safe fallbacks)
+    # Optional filtering
     if BP_ENABLE:
         x = apply_bandpass(x, fs, BP_LOW, BP_HIGH)
     if NOTCH != "Off":
@@ -599,14 +597,18 @@ for r in processed_rows:
     theta, alpha = bands["Theta"], bands["Alpha"]
     beta, lowb   = bands["Beta"], bands["LowBeta"]
     b1520, hib   = bands["Beta15_20"], bands["HiBeta"]
+
     TBR = theta/beta if beta>0 else np.nan
     ThetaLowBeta = theta/lowb if lowb>0 else np.nan
     ThetaAlpha   = theta/alpha if alpha>0 else np.nan
     BetaSplit    = b1520/hib if hib>0 else np.nan
+    BetaOverHiBeta = beta/hib if hib>0 else np.nan  # NEW
+
     records.append({
         "file": r["file"], "channel": r["channel"], "condition": r["condition"], "fs": r["fs"],
         **bands, "TBR": TBR, "ThetaLowBeta": ThetaLowBeta, "ThetaAlpha": ThetaAlpha,
-        "BetaSplit_15_20_over_20_30": BetaSplit
+        "BetaSplit_15_20_over_20_30": BetaSplit,
+        "BetaOverHiBeta": BetaOverHiBeta
     })
 bands_df = pd.DataFrame.from_records(records).sort_values(["channel","condition","file"])
 
@@ -668,15 +670,6 @@ paf_cz_ec = peak_alpha("Cz","EyesClosed")
 paf_f3_ec = peak_alpha("F3","EyesClosed")
 paf_f4_ec = peak_alpha("F4","EyesClosed")
 
-def alpha_flex_O1() -> Optional[float]:
-    eo_rows = bands_df[(bands_df["channel"]=="O1") & (bands_df["condition"]=="EyesOpen")].sort_values("file")
-    if len(eo_rows) < 2: return None
-    eo1, eo2 = float(eo_rows["Alpha"].iloc[0]), float(eo_rows["Alpha"].iloc[1])
-    if not np.isfinite(eo1) or eo1==0 or not np.isfinite(eo2): return None
-    return 100.0*(eo2 - eo1)/eo1
-
-alpha_flex_o1 = alpha_flex_O1()
-
 tbr_cz_eo = get_val("Cz","EyesOpen","TBR")
 tlb_cz_ec = get_val("Cz","EyesClosed","ThetaLowBeta")
 tbr_o1_eo = get_val("O1","EyesOpen","TBR")
@@ -696,7 +689,6 @@ derived_df = pd.DataFrame([
     {"Metric":"Peak Alpha Cz (EC) [Hz]", "Value": paf_cz_ec},
     {"Metric":"Peak Alpha F3 (EC) [Hz]", "Value": paf_f3_ec},
     {"Metric":"Peak Alpha F4 (EC) [Hz]", "Value": paf_f4_ec},
-    {"Metric":"Alpha Flexibility O1 (EO↔EO) [%]", "Value": alpha_flex_o1},
 ])
 
 with tab_metrics:
@@ -743,7 +735,7 @@ with tab_qc:
 # 5) DIALS
 # ──────────────────────────────────────────────────────────────────────────────
 sleep_score = mean_finite([
-    None if alpha_shift_O1 is None else score_range(alpha_shift_O1, 50.0, 70.0),
+    None if alpha_shift_O1 is None else score_range(alpha_shift_O1, 50.0, 70.0),  # method stays as explanatory target
     None if tbr_shift_O1   is None else score_shift(tbr_shift_O1),
 ])
 emotional_score = mean_finite([
@@ -790,35 +782,43 @@ with tab_sliders:
     region = st.radio("Region", ["Posterior","Central","Anterior","Symmetry"], index=0, horizontal=True)
 
     def posterior():
-        ui_slider_row("Alpha Shift O1 (EO → EC)", alpha_shift_O1, -100, 200, unit="%",
-                      green=[(50,70)], yellow=[(40,50),(70,85)], red=[(-100,40),(85,200)], ticks=[-100,50,70,200],
+        # Alpha Shift O1 (EO→EC): up to 200% green, above 200% red; axis extended to 300%
+        ui_slider_row("Alpha Shift O1 (EO → EC)", alpha_shift_O1, -100, 300, unit="%",
+                      green=[(-100,200)], yellow=[], red=[(200,300)],
+                      ticks=[-100,0,200,300],
                       key="alpha_shift_o1", show_note=ENABLE_NOTES, show_badge=DISPLAY_INDICES)
-        ui_slider_row("Alpha Flexibility O1 (EO ↔ EO)", alpha_flex_o1, -100, 250, unit="%",
-                      green=[(0,25)], yellow=[(-10,0),(25,40)], red=[(-100,-10),(40,250)], ticks=[-100,0,25,250],
-                      key="alpha_flex_o1", show_note=ENABLE_NOTES, show_badge=DISPLAY_INDICES)
+
         ui_slider_row("Peak Alpha O1 (EC)", paf_o1_ec, 7, 13, unit=" Hz",
                       green=[(9.5,13.0)], yellow=[(9.0,9.5)], red=[(7.0,9.0)], ticks=[7,9.5,13],
                       key="paf_o1_ec", show_note=ENABLE_NOTES, show_badge=DISPLAY_INDICES)
+
         ui_slider_row("TBR Shift O1 (EO → EC)", tbr_shift_O1, -100, 100, unit="%",
                       green=[(0,100)], yellow=[(-25,0)], red=[(-100,-25)], ticks=[-100,-25,0,100],
                       key="tbr_shift_o1", show_note=ENABLE_NOTES, show_badge=DISPLAY_INDICES)
+
         ui_slider_row("TBR O1 (EO)", tbr_o1_eo, 0, 5,
                       green=[(1.2,2.7)], yellow=[(0.9,1.2),(2.7,3.0)], red=[(0.0,0.9),(3.0,5.0)],
                       ticks=[0,0.9,1.2,2.7,3.0,5.0], key="tbr_o1_eo", show_note=ENABLE_NOTES, show_badge=DISPLAY_INDICES)
+
         ui_slider_row("TBR O1 (EC)", tbr_o1_ec, 0, 5,
                       green=[(1.2,2.7)], yellow=[(0.9,1.2),(2.7,3.0)], red=[(0.0,0.9),(3.0,5.0)],
                       ticks=[0,0.9,1.2,2.7,3.0,5.0], key="tbr_o1_ec", show_note=ENABLE_NOTES, show_badge=DISPLAY_INDICES)
 
     def central():
-        ui_slider_row("Alpha Shift Cz (EO → EC)", alpha_shift_Cz, -100, 200, unit="%",
-                      green=[(50,70)], yellow=[(40,50),(70,85)], red=[(-100,40),(85,200)], ticks=[-100,50,70,200],
+        # Alpha Shift Cz (EO→EC): same visual rule as O1
+        ui_slider_row("Alpha Shift Cz (EO → EC)", alpha_shift_Cz, -100, 300, unit="%",
+                      green=[(-100,200)], yellow=[], red=[(200,300)],
+                      ticks=[-100,0,200,300],
                       key="alpha_shift_cz", show_note=ENABLE_NOTES, show_badge=DISPLAY_INDICES)
+
         ui_slider_row("Peak Alpha Cz (EC)", paf_cz_ec, 7, 13, unit=" Hz",
                       green=[(9.5,13.0)], yellow=[(9.0,9.5)], red=[(7.0,9.0)], ticks=[7,9.5,13],
                       key="paf_cz_ec", show_note=ENABLE_NOTES, show_badge=DISPLAY_INDICES)
+
         ui_slider_row("TBR Cz (EO)", tbr_cz_eo, 0, 5,
                       green=[(1.8,2.2)], yellow=[(1.6,1.8),(2.2,2.4)], red=[(0.0,1.6),(2.4,5.0)],
                       ticks=[0,1.6,1.8,2.2,2.4,5.0], key="tbr_cz_eo", show_note=ENABLE_NOTES, show_badge=DISPLAY_INDICES)
+
         ui_slider_row("Theta/Low-Beta Cz (EC)", tlb_cz_ec, 0.5, 3.5,
                       green=[(1.6,2.4)], yellow=[(1.4,1.6),(2.4,2.6)], red=[(0.5,1.4),(2.6,3.5)],
                       ticks=[0.5,1.6,2.4,3.5], key="tlb_cz_ec", show_note=ENABLE_NOTES, show_badge=DISPLAY_INDICES)
@@ -827,20 +827,37 @@ with tab_sliders:
         for ch in ["F3","F4"]:
             ta     = get_val(ch, "EyesClosed", "ThetaAlpha")
             tbr    = get_val(ch, "EyesClosed", "TBR")
-            bsplit = get_val(ch, "EyesClosed", "BetaSplit_15_20_over_20_30")
+            beta_hb = get_val(ch, "EyesClosed", "BetaOverHiBeta")
             paf    = paf_f3_ec if ch=="F3" else paf_f4_ec
+
             st.markdown(f"<div class='badge'>Frontal {ch} (EC)</div>", unsafe_allow_html=True)
-            ui_slider_row(f"Theta/Alpha {ch} (EC)", ta, 0.2, 3.0, ticks=[0.2,1.0,3.0],
-                          key=f"ta_{ch}_ec", show_note=ENABLE_NOTES, show_badge=DISPLAY_INDICES)
+
+            # Theta/Alpha EC:
+            # - For F3: red 0–1, orange 1–1.2, green >1.2
+            # - For F4: keep default neutral (if desired change, mirror F3 rule)
+            if ch == "F3":
+                ui_slider_row(f"Theta/Alpha {ch} (EC)", ta, 0.2, 3.0,
+                              green=[(1.2,3.0)], yellow=[(1.0,1.2)], red=[(0.2,1.0)],
+                              ticks=[0.2,1.0,1.2,3.0],
+                              key=f"ta_{ch}_ec", show_note=ENABLE_NOTES, show_badge=DISPLAY_INDICES)
+            else:
+                ui_slider_row(f"Theta/Alpha {ch} (EC)", ta, 0.2, 3.0,
+                              ticks=[0.2,1.0,3.0],
+                              key=f"ta_{ch}_ec", show_note=ENABLE_NOTES, show_badge=DISPLAY_INDICES)
+
             ui_slider_row(f"Peak Alpha {ch} (EC)", paf, 7, 13, unit=" Hz",
                           green=[(9.5,13.0)], yellow=[(9.0,9.5)], red=[(7.0,9.0)], ticks=[7,9.5,13],
                           key=f"paf_{ch}_ec", show_note=ENABLE_NOTES, show_badge=DISPLAY_INDICES)
+
             ui_slider_row(f"TBR {ch} (EC)", tbr, 0.5, 4.0,
                           green=[(1.8,2.2)], yellow=[(1.6,1.8),(2.2,2.4)], red=[(0.5,1.6),(2.4,4.0)],
                           ticks=[0.5,1.6,1.8,2.2,2.4,4.0], key=f"tbr_{ch}_ec",
                           show_note=ENABLE_NOTES, show_badge=DISPLAY_INDICES)
-            ui_slider_row(f"Beta 15–20 / 20–30 {ch} (EC)", bsplit, 0.2, 2.0,
-                          ticks=[0.2,1.0,2.0], key=f"betasplit_{ch}_ec",
+
+            # NEW: BetaOverHiBeta with green zone 0.4–0.6
+            ui_slider_row(f"Beta/HiBeta {ch} (EC)", beta_hb, 0.1, 2.0,
+                          green=[(0.4,0.6)], yellow=[(0.3,0.4),(0.6,0.8)], red=[(0.1,0.3),(0.8,2.0)],
+                          ticks=[0.1,0.4,0.5,0.6,2.0], key=f"beta_over_hibeta_{ch}_ec",
                           show_note=ENABLE_NOTES, show_badge=DISPLAY_INDICES)
 
     def symmetry_sliders():
@@ -921,7 +938,10 @@ with tab_export:
     out["PeakAlpha_Cz_EC_Hz"] = paf_cz_ec
     out["PeakAlpha_F3_EC_Hz"] = paf_f3_ec
     out["PeakAlpha_F4_EC_Hz"] = paf_f4_ec
-    out["AlphaFlexibility_O1_EO_EO_pct"] = alpha_flex_o1
+    # NEW: include BetaOverHiBeta for convenience
+    out["BetaOverHiBeta_F3_EC"] = get_val("F3","EyesClosed","BetaOverHiBeta")
+    out["BetaOverHiBeta_F4_EC"] = get_val("F4","EyesClosed","BetaOverHiBeta")
+
     out["Dial_Emotional_0_1"] = emotional_score
     out["Dial_Sleep_0_1"]     = sleep_score
     out["Dial_Cognitive_0_1"] = cognitive_score
@@ -1094,10 +1114,10 @@ with tab_export:
 
         # Band powers (slim columns)
         elems.append(Paragraph("Band powers & core ratios", H2))
-        slim = bands_df[["file","channel","condition","Theta","Alpha","Beta","LowBeta","TBR"]].copy()
+        slim = bands_df[["file","channel","condition","Theta","Alpha","Beta","LowBeta","HiBeta","TBR","ThetaLowBeta","ThetaAlpha","BetaOverHiBeta"]].copy()
         elems.append(pdf_table_from_df(
             slim, page_width,
-            col_ratios=[0.33, 0.08, 0.10, 0.11, 0.11, 0.11, 0.08, 0.08],
+            col_ratios=[0.33, 0.08, 0.10, 0.11, 0.11, 0.11, 0.11, 0.11, 0.10, 0.12, 0.12, 0.12],
             font_size=8
         ))
         elems.append(PageBreak())
@@ -1138,7 +1158,7 @@ with tab_export:
         else:
             elems.append(Paragraph("PSD plots unavailable (install kaleido to embed).", P))
 
-        # Slider snapshots — captions + fixed heights for perfect alignment
+        # Slider snapshots — updated spec (no Alpha Flexibility; new color rules)
         if HAVE_KALEIDO:
             elems.append(PageBreak())
             elems.append(Paragraph("Slider snapshots", H2))
@@ -1152,14 +1172,10 @@ with tab_export:
                                            height=78, bar_thickness=0.12, marker_size=8, **kw)
 
             specs: List[Tuple[str, go.Figure]] = []
-            # Posterior
+            # Posterior (updated alpha shift range/colors)
             specs += [
-                ("Alpha Shift O1 (EO → EC)", sfig("Alpha Shift O1 (EO → EC)", alpha_shift_O1, -100, 200,
-                                                  green=[(50,70)], yellow=[(40,50),(70,85)],
-                                                  red=[(-100,40),(85,200)], ticks=[-100,50,70,200], unit="%")),
-                ("Alpha Flexibility O1 (EO ↔ EO)", sfig("Alpha Flexibility O1 (EO ↔ EO)", alpha_flex_o1, -100, 250,
-                                                        green=[(0,25)], yellow=[(-10,0),(25,40)],
-                                                        red=[(-100,-10),(40,250)], ticks=[-100,0,25,250], unit="%")),
+                ("Alpha Shift O1 (EO → EC)", sfig("Alpha Shift O1 (EO → EC)", alpha_shift_O1, -100, 300,
+                                                  green=[(-100,200)], red=[(200,300)], ticks=[-100,0,200,300], unit="%")),
                 ("Peak Alpha O1 (EC)", sfig("Peak Alpha O1 (EC)", paf_o1_ec, 7, 13,
                                             green=[(9.5,13.0)], yellow=[(9.0,9.5)], red=[(7.0,9.0)],
                                             ticks=[7,9.5,13], unit=" Hz")),
@@ -1173,11 +1189,10 @@ with tab_export:
                                      green=[(1.2,2.7)], yellow=[(0.9,1.2),(2.7,3.0)],
                                      red=[(0.0,0.9),(3.0,5.0)], ticks=[0,0.9,1.2,2.7,3.0,5.0])),
             ]
-            # Central
+            # Central (updated alpha shift range/colors)
             specs += [
-                ("Alpha Shift Cz (EO → EC)", sfig("Alpha Shift Cz (EO → EC)", alpha_shift_Cz, -100, 200,
-                                                  green=[(50,70)], yellow=[(40,50),(70,85)],
-                                                  red=[(-100,40),(85,200)], ticks=[-100,50,70,200], unit="%")),
+                ("Alpha Shift Cz (EO → EC)", sfig("Alpha Shift Cz (EO → EC)", alpha_shift_Cz, -100, 300,
+                                                  green=[(-100,200)], red=[(200,300)], ticks=[-100,0,200,300], unit="%")),
                 ("Peak Alpha Cz (EC)", sfig("Peak Alpha Cz (EC)", paf_cz_ec, 7, 13,
                                             green=[(9.5,13.0)], yellow=[(9.0,9.5)], red=[(7.0,9.0)],
                                             ticks=[7,9.5,13], unit=" Hz")),
@@ -1188,37 +1203,37 @@ with tab_export:
                                                 green=[(1.6,2.4)], yellow=[(1.4,1.6),(2.4,2.6)],
                                                 red=[(0.5,1.4),(2.6,3.5)], ticks=[0.5,1.6,2.4,3.5])),
             ]
-            # Anterior
+            # Anterior (F3/F4) with new TA(F3) colors and Beta/HiBeta sliders
             specs += [
-                ("Theta/Alpha F3 (EC)", sfig("Theta/Alpha F3 (EC)", get_val("F3","EyesClosed","ThetaAlpha"), 0.2, 3.0, ticks=[0.2,1.0,3.0])),
+                ("Theta/Alpha F3 (EC)", sfig("Theta/Alpha F3 (EC)", get_val("F3","EyesClosed","ThetaAlpha"), 0.2, 3.0,
+                                             green=[(1.2,3.0)], yellow=[(1.0,1.2)], red=[(0.2,1.0)],
+                                             ticks=[0.2,1.0,1.2,3.0])),
                 ("Peak Alpha F3 (EC)",  sfig("Peak Alpha F3 (EC)", paf_f3_ec, 7, 13,
                                              green=[(9.5,13.0)], yellow=[(9.0,9.5)], red=[(7.0,9.0)],
                                              ticks=[7,9.5,13], unit=" Hz")),
                 ("TBR F3 (EC)",         sfig("TBR F3 (EC)", get_val("F3","EyesClosed","TBR"), 0.5, 4.0,
                                              green=[(1.8,2.2)], yellow=[(1.6,1.8),(2.2,2.4)],
                                              red=[(0.5,1.6),(2.4,4.0)], ticks=[0.5,1.6,1.8,2.2,2.4,4.0])),
-                ("Beta 15–20 / 20–30 F3 (EC)", sfig("Beta 15–20 / 20–30 F3 (EC)",
-                                                    get_val("F3","EyesClosed","BetaSplit_15_20_over_20_30"),
-                                                    0.2, 2.0, ticks=[0.2,1.0,2.0])),
-                ("Theta/Alpha F4 (EC)", sfig("Theta/Alpha F4 (EC)", get_val("F4","EyesClosed","ThetaAlpha"), 0.2, 3.0, ticks=[0.2,1.0,3.0])),
+                ("Beta/HiBeta F3 (EC)", sfig("Beta/HiBeta F3 (EC)", get_val("F3","EyesClosed","BetaOverHiBeta"), 0.1, 2.0,
+                                             green=[(0.4,0.6)], yellow=[(0.3,0.4),(0.6,0.8)],
+                                             red=[(0.1,0.3),(0.8,2.0)], ticks=[0.1,0.4,0.5,0.6,2.0])),
+                ("Theta/Alpha F4 (EC)", sfig("Theta/Alpha F4 (EC)", get_val("F4","EyesClosed","ThetaAlpha"), 0.2, 3.0,
+                                             ticks=[0.2,1.0,3.0])),
                 ("Peak Alpha F4 (EC)",  sfig("Peak Alpha F4 (EC)", paf_f4_ec, 7, 13,
                                              green=[(9.5,13.0)], yellow=[(9.0,9.5)], red=[(7.0,9.0)],
                                              ticks=[7,9.5,13], unit=" Hz")),
                 ("TBR F4 (EC)",         sfig("TBR F4 (EC)", get_val("F4","EyesClosed","TBR"), 0.5, 4.0,
                                              green=[(1.8,2.2)], yellow=[(1.6,1.8),(2.2,2.4)],
                                              red=[(0.5,1.6),(2.4,4.0)], ticks=[0.5,1.6,1.8,2.2,2.4,4.0])),
-                ("Beta 15–20 / 20–30 F4 (EC)", sfig("Beta 15–20 / 20–30 F4 (EC)",
-                                                    get_val("F4","EyesClosed","BetaSplit_15_20_over_20_30"),
-                                                    0.2, 2.0, ticks=[0.2,1.0,2.0])),
+                ("Beta/HiBeta F4 (EC)", sfig("Beta/HiBeta F4 (EC)", get_val("F4","EyesClosed","BetaOverHiBeta"), 0.1, 2.0,
+                                             green=[(0.4,0.6)], yellow=[(0.3,0.4),(0.6,0.8)],
+                                             red=[(0.1,0.3),(0.8,2.0)], ticks=[0.1,0.4,0.5,0.6,2.0])),
             ]
 
             # render 2 per row with captions
             row_cells = []
-            from reportlab.platypus import Table, TableStyle, Paragraph  # type: ignore
-            from reportlab.lib.styles import ParagraphStyle  # type: ignore
             for title, fig in specs:
                 png = fig.to_image(format="png", scale=2)
-                from reportlab.platypus import Image  # type: ignore
                 img = Image(io.BytesIO(png))
                 img.drawWidth = slider_img_w
                 img.drawHeight = slider_img_h
