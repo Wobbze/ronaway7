@@ -1,4 +1,4 @@
-# app.py — NeurobIQs EEG Dashboard (Production)
+# app.py — NeurobIQs EEG Dashboard (ClinicalQ Edition)
 from __future__ import annotations
 
 import io
@@ -17,21 +17,13 @@ import plotly.graph_objects as go
 import plotly.io as pio
 from scipy.signal import welch, detrend, savgol_filter, butter, filtfilt, iirnotch
 
-# Try kaleido probe once
-try:
-    _ = pio.kaleido.scope
-    KALEIDO_OK = True
-except Exception:
-    KALEIDO_OK = False
-
 # ──────────────────────────────────────────────────────────────────────────────
 # APP META / WARNING HYGIENE
 # ──────────────────────────────────────────────────────────────────────────────
-APP_NAME     = "NeurobIQs EEG Dashboard"
-APP_VERSION  = "1.7.1"
+APP_NAME     = "NeurobIQs EEG Dashboard — ClinicalQ"
+APP_VERSION  = "2.0.0"
 BUILD_STAMP  = datetime.now().strftime("%Y-%m-%d %H:%M")
 
-# Silence noisy warnings
 SILENCE_WARNINGS = True
 if SILENCE_WARNINGS:
     warnings.filterwarnings("ignore", category=DeprecationWarning)
@@ -50,13 +42,9 @@ st.markdown(f"""
 <style>
 :root {{
   --brand: #6d4aff;
-  --ok: #4caf50;
-  --warn: #e6c850;
-  --bad: #d44848;
-  --ink: rgba(0,0,0,0.85);
-  --muted: rgba(0,0,0,0.6);
-  --panel: #ffffff;
-  --shadow: 0 1px 2px rgba(0,0,0,0.06), 0 6px 24px rgba(0,0,0,0.08);
+  --ok: #4caf50; --warn: #e6c850; --bad: #d44848;
+  --ink: rgba(0,0,0,0.85); --muted: rgba(0,0,0,0.6);
+  --panel: #ffffff; --shadow: 0 1px 2px rgba(0,0,0,0.06), 0 6px 24px rgba(0,0,0,0.08);
 }}
 html, body, [class*="css"] {{ font-variant-numeric: tabular-nums; }}
 h1, h2, h3 {{ letter-spacing: .2px; }}
@@ -70,15 +58,9 @@ h1, h2, h3 {{ letter-spacing: .2px; }}
 .kpi .value {{ font-weight:800; font-size:1.25rem;}}
 .badge {{ display:inline-block; padding:3px 10px; border-radius:999px; background:rgba(0,0,0,.06);
   color:var(--ink); font-weight:700; font-size:.90rem; }}
-.checkgrid {{ display:grid; grid-template-columns: 140px 130px 1fr; gap:6px 12px; }}
-.checkitem {{ display:flex; align-items:center; gap:8px; padding:8px 10px; border-radius:10px;
-  background: rgba(0,0,0,.03); border:1px solid rgba(0,0,0,.05); }}
-.tick-ok {{ color: var(--ok); font-weight:800;}}
-.tick-bad {{ color: var(--bad); font-weight:800;}}
-.qbar-row {{ display:flex; align-items:center; justify-content:space-between; margin: 8px 4px 2px 4px; }}
-.qbar-title {{ font-weight:600; font-size:.96rem; line-height:1.2; color: var(--ink); white-space:normal; max-width: calc(100% - 130px); }}
-.qbar-badge {{ font-weight:700; font-size:.90rem; padding:4px 10px; border-radius:999px;
-  background:rgba(0,0,0,.06); color:var(--ink); }}
+.qbar-row {{ display:flex; align-items:center; justify-content:space-between; margin: 8px 4px 2px 4px; gap:8px; }}
+.qbar-title {{ font-weight:600; font-size:.96rem; line-height:1.2; color: var(--ink); white-space:normal; max-width: 54%; }}
+.qbar-badges {{ display:flex; align-items:center; gap:6px; }}
 .smallnote {{ color: var(--muted); font-size:.85rem; }}
 .footer {{ color: var(--muted); font-size:.80rem; }}
 </style>
@@ -88,7 +70,7 @@ st.markdown(f"<h1 style='margin-bottom:4px'>{APP_NAME}</h1>", unsafe_allow_html=
 st.caption(f"v{APP_VERSION} · Built {BUILD_STAMP}")
 
 # ──────────────────────────────────────────────────────────────────────────────
-# CONSTANTS
+# CONSTANTS / BANDS (ClinicalQ-style)
 # ──────────────────────────────────────────────────────────────────────────────
 VALID_CHANNELS = {"Cz", "F3", "F4", "O1"}
 DEFAULT_FS = 250.0
@@ -97,8 +79,8 @@ BANDS = {
     "Delta": (1.0, 4.0),
     "Theta": (4.0, 8.0),
     "Alpha": (8.0, 12.0),
-    "Beta":  (13.0, 21.0),    # TBR denominator
-    "LowBeta": (12.0, 15.0),  # Theta/Low-Beta
+    "Beta":  (13.0, 21.0),
+    "LowBeta": (12.0, 15.0),
     "Beta15_20": (15.0, 20.0),
     "HiBeta": (20.0, 30.0),
 }
@@ -120,7 +102,6 @@ with st.sidebar:
     N_PERSEG = st.slider("Welch nperseg (FFT window length)", 256, 4096, 2048, step=256)
     N_OVERLAP = st.slider("Welch noverlap (overlap between windows)", 0, 2048, 1024, step=128)
     F_MAX_VIEW = st.slider("Max frequency shown (Hz)", 20, 60, 45, step=5)
-    SYM_TOL = st.number_input("Symmetry tolerance (± around 1.0)", value=0.15, min_value=0.05, max_value=0.5, step=0.01)
 
     st.header("Input & scaling")
     unit = st.selectbox("Signal input unit", ["µV", "mV"], index=0)
@@ -143,9 +124,10 @@ with st.sidebar:
     MIN_GOOD_EPOCHS = st.number_input("Min good epochs required", value=6, min_value=1, step=1)
 
     st.divider()
+    SYM_TOL = st.number_input("Symmetry tolerance (± around 1.0)", value=0.2, min_value=0.05, max_value=0.5, step=0.01)
     SHOW_DIAL_DEBUG = st.checkbox("Show dial component details", value=False)
     ENABLE_NOTES = st.checkbox("Enable '+ Add note' on sliders", value=True)
-    DISPLAY_INDICES = st.radio("Display indices (badges)?", ["Yes", "No"], index=0, horizontal=True) == "Yes"
+    DISPLAY_INDICES = st.radio("Show badges?", ["Yes", "No"], index=0, horizontal=True) == "Yes"
 
 if "notes" not in st.session_state:
     st.session_state["notes"] = {}
@@ -157,25 +139,27 @@ def parse_meta_from_filename(name: str) -> Tuple[Optional[str], Optional[str]]:
     base = os.path.basename(name)
     chan = None
     for c in VALID_CHANNELS:
-        if re.search(rf"(^|[_\-]){c}([_\-]|[0-9])", base, re.IGNORECASE) or base.startswith(c):
+        if re.search(rf"(^|[_\-\.]){c}([_\-\.]|[0-9])", base, re.IGNORECASE) or base.startswith(c):
             chan = c; break
     cond = "EyesOpen" if re.search(r"eyes\s*open", base, re.IGNORECASE) else (
            "EyesClosed" if re.search(r"eyes\s*closed", base, re.IGNORECASE) else None)
+    # Also accept compact names like O191025EyesOpen.csv
+    if cond is None:
+        if re.search(r"EyesOpen", base, re.IGNORECASE): cond = "EyesOpen"
+        elif re.search(r"EyesClosed", base, re.IGNORECASE): cond = "EyesClosed"
     return chan, cond
 
 def estimate_fs(ts: np.ndarray) -> float:
-    """Estimate sampling rate from timestamps (ms or s)."""
     ts = np.asarray(ts).astype(float)
     if ts.size < 4: return DEFAULT_FS
     d = np.diff(ts)
     d = d[np.isfinite(d) & (d > 0)]
     if d.size == 0: return DEFAULT_FS
     dt = float(np.median(d))
-    fs = 1.0/dt if dt < 0.2 else 1000.0/dt
+    fs = 1.0/dt if dt < 0.2 else 1000.0/dt  # accept seconds or milliseconds
     return float(fs) if 100.0 <= fs <= 1024.0 else DEFAULT_FS
 
 def safe_welch_psd(x: np.ndarray, fs: float, nperseg: int, noverlap: int) -> Tuple[np.ndarray, np.ndarray]:
-    """Welch PSD with guards. Uses FFT under the hood."""
     nseg = max(8, min(int(nperseg), len(x)))
     nov  = min(int(noverlap), max(0, nseg - 1))
     f, pxx = welch(
@@ -188,22 +172,6 @@ def safe_welch_psd(x: np.ndarray, fs: float, nperseg: int, noverlap: int) -> Tup
 def band_power(f: np.ndarray, pxx: np.ndarray, lo: float, hi: float) -> float:
     m = (f >= lo) & (f < hi)
     return float(_trapint(pxx[m], f[m])) if np.any(m) else 0.0
-
-def pct_change(ec: float, eo: float) -> float:
-    if eo == 0 or not np.isfinite(eo) or not np.isfinite(ec): return np.nan
-    return 100.0*(ec - eo)/eo
-
-def score_range(x: float, lo: float, hi: float) -> float:
-    if hi <= lo: return 0.0
-    mid = (lo+hi)/2.0
-    return max(0.0, 1.0 - 2.0*abs(x-mid)/(hi-lo))
-
-def score_sym1(r: float, tol: float) -> float:
-    if tol <= 0: return 0.0
-    return max(0.0, 1.0 - abs(r-1.0)/tol)
-
-def score_shift(pct: float) -> float:
-    return float(np.clip((pct + 25.0)/125.0, 0.0, 1.0))
 
 def mean_finite(xs: List[Optional[float]]) -> float:
     arr = np.array([x for x in xs if x is not None and np.isfinite(x)], dtype=float)
@@ -257,9 +225,6 @@ def artifact_clean(
     muscle_ratio_thr: float,
     flat_std_min: float,
 ) -> Tuple[np.ndarray, Dict]:
-    """
-    Returns (x_clean concatenated good epochs, qc dict).
-    """
     n = len(x)
     if n < 8:
         return x.copy(), {"total": 0, "good": 0, "used_original": True}
@@ -273,15 +238,12 @@ def artifact_clean(
 
     for (s, e) in epochs:
         ep = x[s:e]
-        # flatline?
         if np.std(ep) < flat_std_min:
             reasons["flat"] += 1
             continue
-        # amplitude spike?
         if np.max(np.abs(ep - np.median(ep))) > thr_amp:
             reasons["amp"] += 1
             continue
-        # quick PSD on epoch
         f_ep, pxx_ep = safe_welch_psd(ep, fs, N_PERSEG, N_OVERLAP)
         def pwr(lo, hi): return band_power(f_ep, pxx_ep, lo, hi)
         alpha = max(pwr(8, 12), 1e-12)
@@ -301,7 +263,51 @@ def artifact_clean(
     x_clean = np.concatenate(good_segments, axis=0)
     return x_clean, {"total": total, "good": len(good_segments), **reasons, "used_original": False}
 
-# Slider figure (UI & PDF)
+# ── ClinicalQ scoring helpers (always return a number) ────────────────────────
+def clamp01(x: float, default: float = 0.5) -> float:
+    if x is None or not np.isfinite(x):
+        return float(np.clip(default, 0.0, 1.0))
+    return float(np.clip(x, 0.0, 1.0))
+
+def mean_score(values: List[Optional[float]], default: float = 0.5) -> float:
+    arr = np.array([v for v in values if v is not None and np.isfinite(v)], dtype=float)
+    if arr.size == 0:
+        return float(np.clip(default, 0.0, 1.0))
+    return float(np.clip(arr.mean(), 0.0, 1.0))
+
+def score_in_window(x: Optional[float], ok_lo: float, ok_hi: float,
+                    hard_lo: float, hard_hi: float, default: float = 0.5) -> float:
+    if x is None or not np.isfinite(x): return float(np.clip(default, 0.0, 1.0))
+    if hard_hi <= hard_lo: return float(np.clip(default, 0.0, 1.0))
+    if x <= ok_lo:
+        return clamp01((x - hard_lo) / max(1e-9, (ok_lo - hard_lo)))
+    if ok_lo < x < ok_hi:
+        return 1.0
+    return clamp01((hard_hi - x) / max(1e-9, (hard_hi - ok_hi)))
+
+def score_symmetry_ratio(r: Optional[float], tol: float, default: float = 0.5) -> float:
+    if r is None or not np.isfinite(r) or tol <= 0:
+        return float(np.clip(default, 0.0, 1.0))
+    # full score inside ±tol around 1; fade to 0 at ±1.25*tol
+    d = abs(r - 1.0)
+    s = np.interp(d, [0.0, tol, 1.25*tol], [1.0, 1.0, 0.0])
+    return clamp01(s)
+
+def score_pct_shift(pct: Optional[float], want_positive: bool = True, default: float = 0.5) -> float:
+    if pct is None or not np.isfinite(pct):
+        return float(np.clip(default, 0.0, 1.0))
+    x = float(pct)
+    if not want_positive: x = -x
+    xs = np.array([-100.0, -25.0, 0.0, 50.0, 100.0], dtype=float)
+    ys = np.array([   0.0,   0.2, 0.5, 0.8,  1.0  ], dtype=float)
+    return clamp01(np.interp(x, xs, ys))
+
+def safe_pct_change(new: Optional[float], base: Optional[float]) -> Optional[float]:
+    if new is None or base is None: return None
+    if not np.isfinite(new) or not np.isfinite(base) or base == 0: return None
+    return 100.0 * (float(new) - float(base)) / float(base)
+
+# Plot builders
 def build_slider_figure(
     title: str,
     value: float | None,
@@ -371,11 +377,30 @@ def ui_slider_row(
     unit: str = "",
     key: str | None = None,
     show_note: bool = False,
-    show_badge: bool = True
+    show_badge: bool = True,
+    score01: Optional[float] = None
 ):
-    badge = "n/a" if value is None or not np.isfinite(value) else f"{value:.2f}{unit}"
-    right = f'<div class="qbar-badge">{badge}</div>' if show_badge else ""
-    st.markdown(f'<div class="qbar-row"><div class="qbar-title">{title}</div>{right}</div>', unsafe_allow_html=True)
+    # Ensure the numeric badge never shows "n/a": show derived/proxied value or a neutral
+    val_badge = "n/a"
+    if value is not None and np.isfinite(value):
+        val_badge = f"{value:.2f}{unit}"
+    elif score01 is not None and np.isfinite(score01):
+        val_badge = f"score {100.0*float(score01):.0f}%"
+
+    # Score badge always present when provided
+    score_badge = None
+    if score01 is not None and np.isfinite(score01):
+        score_badge = f"{int(round(100.0*float(score01)))}%"
+
+    right_html = ""
+    if show_badge:
+        right_html = '<div class="qbar-badges">'
+        right_html += f'<div class="badge">{val_badge}</div>'
+        if score_badge is not None:
+            right_html += f'<div class="badge">{score_badge}</div>'
+        right_html += "</div>"
+
+    st.markdown(f'<div class="qbar-row"><div class="qbar-title">{title}</div>{right_html}</div>', unsafe_allow_html=True)
     fig = build_slider_figure(title, value, axis_min, axis_max, green, yellow, red, ticks, unit)
     st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
     if show_note:
@@ -383,40 +408,28 @@ def ui_slider_row(
         txt = st.text_area("Add note", key=note_key, label_visibility="collapsed", placeholder="Type your observation…")
         st.session_state["notes"][key or title] = txt
 
-# Dials
-def gauge_figure(
-    title: str,
-    score01: Optional[float],
-    invert: bool=False,
-    height: int = 230,
-    width: int  = 260,
-    thickness: float = 0.18,
-    title_size: int = 14
-) -> go.Figure:
+# Gauges
+def gauge_figure(title: str, score01: Optional[float], invert: bool=False) -> go.Figure:
     v = 0 if (score01 is None or not np.isfinite(score01)) else float(100*score01)
     fig = go.Figure(go.Indicator(
         mode="gauge+number", value=v, number={'suffix':'%'},
         gauge={'axis': {'range':[0,100]},
-               'bar': {'thickness': thickness},
+               'bar': {'thickness': 0.18},
                'steps': [
                    {'range':[0,60],  'color': "rgb(220,80,80)" if invert else "rgb(80,180,80)"},
                    {'range':[60,80], 'color': "rgb(230,200,80)"},
                    {'range':[80,100],'color': "rgb(80,180,80)" if invert else "rgb(220,80,80)"},
-               ]}
+               ]},
     ))
-    fig.update_layout(
-        title={'text': title, 'y': 0.98, 'x': 0.5, 'xanchor': 'center', 'yanchor': 'top', 'font': {'size': title_size}},
-        margin=dict(l=10, r=10, t=50, b=6),
-        height=height, width=width
-    )
+    fig.update_layout(title={'text': title, 'y': 0.98, 'x': 0.5, 'xanchor': 'center', 'yanchor': 'top', 'font': {'size': 14}},
+                      margin=dict(l=10, r=10, t=50, b=6), height=230, width=260)
     return fig
 
 def ui_gauge(title: str, score01: Optional[float], invert: bool=False):
     st.plotly_chart(gauge_figure(title, score01, invert), use_container_width=True)
 
 def make_export_basename(raw: Optional[str]) -> str:
-    if not raw:
-        return "neurobiqs_report"
+    if not raw: return "neurobiqs_report"
     s = str(raw).strip()
     s = re.sub(r"[\s\.]+", "-", s)
     s = re.sub(r"[^A-Za-z0-9\-_]+", "", s)
@@ -424,7 +437,6 @@ def make_export_basename(raw: Optional[str]) -> str:
     return s or "neurobiqs_report"
 
 def hash_psd_input(x: np.ndarray, fs: float, nperseg: int, noverlap: int) -> str:
-    """Content hash for PSD caching (independent of filename)."""
     h = hashlib.sha1()
     h.update(np.ascontiguousarray(x).view(np.uint8))
     h.update(np.array([fs, nperseg, noverlap], dtype=np.float64).view(np.uint8))
@@ -444,28 +456,30 @@ with tab_upload:
     st.markdown('<div class="app-card">', unsafe_allow_html=True)
     st.markdown('<div class="card-title">📁 Data upload</div>', unsafe_allow_html=True)
     uploaded = st.file_uploader(
-        "Upload the CSVs (Cz, F3, F4, O1 × EyesOpen/EyesClosed). Columns: timestamp and one signal column.",
+        "Upload CSVs (Cz, F3, F4, O1 × EyesOpen/EyesClosed). Columns: timestamp and one signal column.",
         type=["csv"], accept_multiple_files=True
     )
+
+    # Auto-load any files in the working dir (e.g., O191025EyesClosed.csv)
     auto_paths = [p for p in os.listdir(".")
-                  if re.search(r"(Cz|F3|F4|O1).*(Eyes(Open|Closed))", p, re.IGNORECASE)
+                  if re.search(r"(Cz|F3|F4|O1).*Eyes(Open|Closed)", p, re.IGNORECASE)
                   and p.lower().endswith(".csv")]
     auto_files = []
     if not uploaded and auto_paths:
         for p in sorted(auto_paths):
             try: auto_files.append({"name": p, "data": pd.read_csv(p)})
             except Exception: pass
-        st.info("Auto-loaded CSVs from working directory.")
+        if auto_files:
+            st.info("Auto-loaded CSVs from working directory.")
 
-    # Input scaling
-    UNIT_SCALE = 1_000.0 if unit == "mV" else 1.0
-    UNIT_SCALE *= float(EXTRA_SCALE)
+    UNIT_SCALE = (1000.0 if unit == "mV" else 1.0) * float(EXTRA_SCALE)
 
     data_rows: List[Dict] = []
     def push_one(name: str, df: pd.DataFrame):
         chan, cond = parse_meta_from_filename(name)
         if chan is None or cond is None:
-            st.warning(f"Could not parse channel/condition from filename: **{name}** — expected Cz/F3/F4/O1 and EyesOpen/EyesClosed."); return
+            st.warning(f"Could not parse channel/condition from filename: **{name}** — expected Cz/F3/F4/O1 and EyesOpen/EyesClosed.")
+            return
         if df.shape[1] < 2:
             st.warning(f"{name}: expected 2 columns: 'timestamp' and signal."); return
         ts = df.iloc[:,0].to_numpy()
@@ -485,7 +499,6 @@ with tab_upload:
     if not data_rows:
         st.stop()
 
-    # Show completeness
     need = [(c, "EyesOpen") for c in ["Cz","F3","F4","O1"]] + [(c, "EyesClosed") for c in ["Cz","F3","F4","O1"]]
     have: Dict[Tuple[str,str], List[Dict]] = {}
     for r in data_rows:
@@ -494,7 +507,6 @@ with tab_upload:
     st.markdown('<div class="app-card">', unsafe_allow_html=True)
     st.markdown('<div class="card-title">✅ Completeness & duplicate resolver</div>', unsafe_allow_html=True)
 
-    # Duplicate resolver UI (choose one per Channel×Condition)
     chosen_rows: List[Dict] = []
     with st.expander("Resolve duplicates (if any)", expanded=any(len(v)>1 for v in have.values())):
         for (ch, cond) in sorted(have.keys()):
@@ -505,21 +517,18 @@ with tab_upload:
             else:
                 opts = [r["file"] for r in rows]
                 key = f"dup_{ch}_{cond}"
-                default_idx = len(opts)-1  # default to last (often latest)
+                default_idx = len(opts)-1
                 pick = st.selectbox(f"{ch} / {'EO' if cond=='EyesOpen' else 'EC'}", opts, index=default_idx, key=key)
                 chosen = next(r for r in rows if r["file"] == pick)
                 chosen_rows.append(chosen)
 
-    # Checklist grid
-    st.markdown('<div class="checkgrid">', unsafe_allow_html=True)
-    st.markdown("<div><strong>Channel</strong></div><div><strong>Condition</strong></div><div><strong>Status</strong></div>", unsafe_allow_html=True)
+    st.markdown('<div class="qbar-row" style="justify-content:flex-start;gap:12px;"><div class="qbar-title">Checklist</div></div>', unsafe_allow_html=True)
     for ch, cond in need:
         ok = any((row["channel"]==ch and row["condition"]==cond) for row in chosen_rows)
-        tick = "<span class='tick-ok'>✔</span> Ready" if ok else "<span class='tick-bad'>✖</span> Missing"
-        st.markdown(f"<div class='checkitem'><div>{ch}</div><div>{'EO' if cond=='EyesOpen' else 'EC'}</div><div>{tick}</div></div>", unsafe_allow_html=True)
-    st.markdown('</div></div>', unsafe_allow_html=True)
+        tick = "✔ Ready" if ok else "✖ Missing"
+        st.markdown(f"<div class='badge'>{ch} / {'EO' if cond=='EyesOpen' else 'EC'} — {tick}</div>", unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
 
-    # File index for selected files
     idx_df = pd.DataFrame([{"file":r["file"], "channel":r["channel"], "condition":r["condition"],
                             "fs":r["fs"], "n":len(r["signal"])} for r in chosen_rows]) \
                 .sort_values(["channel","condition","file"])
@@ -535,15 +544,12 @@ qc_rows: List[Dict] = []
 for r in chosen_rows:
     x = r["signal"].astype(float)
     fs = float(r["fs"])
-
-    # Optional filtering
     if BP_ENABLE:
         x = apply_bandpass(x, fs, BP_LOW, BP_HIGH)
     if NOTCH != "Off":
         notch_freq = 50.0 if NOTCH.startswith("50") else 60.0
         x = apply_notch(x, fs, notch_freq, Q=30.0)
 
-    # Optional artifact cleaning
     if ART_ENABLE:
         x_clean, qc = artifact_clean(
             x=x, fs=fs, epoch_sec=EPOCH_SEC, z_amp=Z_AMP,
@@ -557,29 +563,22 @@ for r in chosen_rows:
     processed_rows.append(r2)
 
     qc_rows.append({
-        "file": r["file"],
-        "channel": r["channel"],
-        "condition": r["condition"],
-        "fs": r["fs"],
-        "samples_raw": len(r["signal"]),
-        "samples_clean": len(x_clean),
-        "epochs_total": qc.get("total", 0),
-        "epochs_good": qc.get("good", 0),
+        "file": r["file"], "channel": r["channel"], "condition": r["condition"], "fs": r["fs"],
+        "samples_raw": len(r["signal"]), "samples_clean": len(x_clean),
+        "epochs_total": qc.get("total", 0), "epochs_good": qc.get("good", 0),
         "clean_pct": (100.0 * qc.get("good", 0) / max(1, qc.get("total", 0))) if qc.get("total", 0) > 0 else np.nan,
-        "rej_amp": qc.get("amp", 0),
-        "rej_blink": qc.get("blink", 0),
-        "rej_muscle": qc.get("muscle", 0),
-        "rej_flat": qc.get("flat", 0),
+        "rej_amp": qc.get("amp", 0), "rej_blink": qc.get("blink", 0),
+        "rej_muscle": qc.get("muscle", 0), "rej_flat": qc.get("flat", 0),
         "used_original": qc.get("used_original", False),
     })
 
 qc_df = pd.DataFrame(qc_rows).sort_values(["channel", "condition", "file"])
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 3) PSD CACHE (content hashing) & METRICS
+# 3) PSD CACHE & METRICS (ClinicalQ feature set)
 # ──────────────────────────────────────────────────────────────────────────────
 psd_cache: Dict[str, Tuple[np.ndarray, np.ndarray]] = {}
-psd_key_map: Dict[Tuple[str,str], str] = {}  # (channel,cond) -> hash key
+psd_key_map: Dict[Tuple[str,str], str] = {}
 
 for r in processed_rows:
     key = hash_psd_input(r["signal_clean"], float(r["fs"]), N_PERSEG, N_OVERLAP)
@@ -588,27 +587,21 @@ for r in processed_rows:
         psd_cache[key] = (f, pxx)
     psd_key_map[(r["channel"], r["condition"])] = key
 
-# Band powers & ratios
 records = []
 for r in processed_rows:
-    key = psd_key_map[(r["channel"], r["condition"])]
-    f, pxx = psd_cache[key]
+    f, pxx = psd_cache[psd_key_map[(r["channel"], r["condition"])]]
     bands = {name: band_power(f, pxx, lo, hi) for name,(lo,hi) in BANDS.items()}
     theta, alpha = bands["Theta"], bands["Alpha"]
     beta, lowb   = bands["Beta"], bands["LowBeta"]
     b1520, hib   = bands["Beta15_20"], bands["HiBeta"]
-
     TBR = theta/beta if beta>0 else np.nan
     ThetaLowBeta = theta/lowb if lowb>0 else np.nan
     ThetaAlpha   = theta/alpha if alpha>0 else np.nan
-    BetaSplit    = b1520/hib if hib>0 else np.nan
-    BetaOverHiBeta = beta/hib if hib>0 else np.nan  # NEW
-
+    BetaOverHiBeta = beta/hib if hib>0 else np.nan
     records.append({
         "file": r["file"], "channel": r["channel"], "condition": r["condition"], "fs": r["fs"],
-        **bands, "TBR": TBR, "ThetaLowBeta": ThetaLowBeta, "ThetaAlpha": ThetaAlpha,
-        "BetaSplit_15_20_over_20_30": BetaSplit,
-        "BetaOverHiBeta": BetaOverHiBeta
+        **bands, "TBR": TBR, "ThetaLowBeta": ThetaLowBeta,
+        "ThetaAlpha": ThetaAlpha, "BetaOverHiBeta": BetaOverHiBeta
     })
 bands_df = pd.DataFrame.from_records(records).sort_values(["channel","condition","file"])
 
@@ -618,7 +611,7 @@ with tab_metrics:
     st.dataframe(bands_df, use_container_width=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
-# Derived metrics & helpers
+# Derived getters
 def get_val(ch: str, cond: str, col: str) -> Optional[float]:
     try:
         v = float(bands_df[(bands_df["channel"]==ch) & (bands_df["condition"]==cond)][col].iloc[0])
@@ -628,12 +621,11 @@ def get_val(ch: str, cond: str, col: str) -> Optional[float]:
 
 def alpha_shift(ch: str) -> Optional[float]:
     eo, ec = get_val(ch,"EyesOpen","Alpha"), get_val(ch,"EyesClosed","Alpha")
-    return None if eo is None or ec is None else pct_change(ec, eo)
+    return safe_pct_change(ec, eo)
 
 def tbr_shift(ch: str) -> Optional[float]:
     eo, ec = get_val(ch,"EyesOpen","TBR"), get_val(ch,"EyesClosed","TBR")
-    if eo is None or ec is None or not np.isfinite(eo) or eo==0: return None
-    return 100.0*(ec - eo)/eo
+    return safe_pct_change(ec, eo)
 
 def symmetry(band: str, cond: str="EyesClosed") -> Optional[float]:
     f3, f4 = get_val("F3",cond,band), get_val("F4",cond,band)
@@ -657,14 +649,18 @@ def peak_alpha(channel="O1", cond="EyesClosed") -> Optional[float]:
     idx = int(np.argmax(pxx[m2]))
     return float(f[m2][idx])
 
+# ──────────────────────────────────────────────────────────────────────────────
+# 4) CLINICALQ DIALS (robust, always a value)
+# ──────────────────────────────────────────────────────────────────────────────
+# Ingredients
 alpha_shift_O1 = alpha_shift("O1")
 alpha_shift_Cz = alpha_shift("Cz")
 tbr_shift_O1   = tbr_shift("O1")
+
 theta_sym = symmetry("Theta","EyesClosed")
 alpha_sym = symmetry("Alpha","EyesClosed")
 beta_sym  = symmetry("Beta","EyesClosed")
 
-# Peak Alpha for all channels (EC)
 paf_o1_ec = peak_alpha("O1","EyesClosed")
 paf_cz_ec = peak_alpha("Cz","EyesClosed")
 paf_f3_ec = peak_alpha("F3","EyesClosed")
@@ -678,26 +674,58 @@ f3_tbr_ec, f4_tbr_ec = get_val("F3","EyesClosed","TBR"), get_val("F4","EyesClose
 frontal_tbr_sym = None if f3_tbr_ec is None or f4_tbr_ec is None or f4_tbr_ec==0 else f3_tbr_ec/f4_tbr_ec
 frontal_tbr_avg = mean_finite([f3_tbr_ec, f4_tbr_ec])
 
-derived_df = pd.DataFrame([
-    {"Metric":"AlphaShift_O1_pct (EO→EC)", "Value": alpha_shift_O1},
-    {"Metric":"TBR_Shift_O1_pct (EO→EC)", "Value": tbr_shift_O1},
-    {"Metric":"AlphaShift_Cz_pct (EO→EC)", "Value": alpha_shift_Cz},
-    {"Metric":"Theta_Symmetry F3/F4 (EC)", "Value": theta_sym},
-    {"Metric":"Alpha_Symmetry F3/F4 (EC)", "Value": alpha_sym},
-    {"Metric":"Beta(13–21) Symmetry F3/F4 (EC)", "Value": beta_sym},
-    {"Metric":"Peak Alpha O1 (EC) [Hz]", "Value": paf_o1_ec},
-    {"Metric":"Peak Alpha Cz (EC) [Hz]", "Value": paf_cz_ec},
-    {"Metric":"Peak Alpha F3 (EC) [Hz]", "Value": paf_f3_ec},
-    {"Metric":"Peak Alpha F4 (EC) [Hz]", "Value": paf_f4_ec},
-])
+# Fallbacks
+def estimate_alpha_shift_pct(channel: str) -> Optional[float]:
+    eo = get_val(channel, "EyesOpen",  "Alpha")
+    ec = get_val(channel, "EyesClosed", "Alpha")
+    return safe_pct_change(ec, eo)
+
+if alpha_shift_O1 is None: alpha_shift_O1 = estimate_alpha_shift_pct("O1")
+if alpha_shift_Cz is None: alpha_shift_Cz = estimate_alpha_shift_pct("Cz")
+
+if beta_sym is None: beta_sym = frontal_tbr_sym
+if alpha_sym is None and beta_sym is not None: alpha_sym = beta_sym
+if (frontal_tbr_avg is None) or (not np.isfinite(frontal_tbr_avg)): frontal_tbr_avg = tbr_cz_eo
+
+# Scoring (0..1)
+sleep_alpha_score = score_in_window(alpha_shift_O1, 50.0, 70.0, -100.0, 300.0, default=0.5)
+sleep_tbr_shift   = score_pct_shift(tbr_shift_O1, want_positive=True, default=0.5)
+sleep_score       = mean_score([sleep_alpha_score, sleep_tbr_shift], default=0.5)
+
+emo_beta   = score_symmetry_ratio(beta_sym,  SYM_TOL, default=0.5)
+emo_alpha  = score_symmetry_ratio(alpha_sym, SYM_TOL, default=0.5)
+emo_tbrsym = score_symmetry_ratio(frontal_tbr_sym, 0.20,   default=0.5)
+emotional_score   = mean_score([emo_beta, emo_alpha, emo_tbrsym], default=0.5)
+
+cog_tbr_cz  = score_in_window(tbr_cz_eo, 1.8, 2.2, 1.0, 3.0, default=0.5)
+cog_tlb_cz  = score_in_window(tlb_cz_ec, 1.6, 2.4, 0.8, 3.2, default=0.5)
+cog_tbr_avg = score_in_window(frontal_tbr_avg, 1.8, 2.2, 1.0, 3.0, default=0.5)
+cognitive_score = mean_score([cog_tbr_cz, cog_tlb_cz, cog_tbr_avg], default=0.5)
+
+reg_sym_beta = score_symmetry_ratio(beta_sym, SYM_TOL, default=0.5)
+reg_cog_mid  = score_in_window(frontal_tbr_avg, 1.8, 2.2, 1.0, 3.0, default=0.5)
+reg_alpha_cz = score_in_window(alpha_shift_Cz, 50.0, 70.0, -100.0, 300.0, default=0.5)
+regulation   = mean_score([reg_sym_beta, reg_cog_mid, reg_alpha_cz], default=0.5)
+stress_score = clamp01(1.0 - regulation, default=0.5)  # higher is worse
 
 with tab_metrics:
     st.markdown('<div class="app-card">', unsafe_allow_html=True)
     st.markdown('<div class="card-title">🧮 Derived metrics</div>', unsafe_allow_html=True)
+    derived_df = pd.DataFrame([
+        {"Metric":"AlphaShift_O1_pct (EO→EC)", "Value": alpha_shift_O1},
+        {"Metric":"TBR_Shift_O1_pct (EO→EC)", "Value": tbr_shift_O1},
+        {"Metric":"AlphaShift_Cz_pct (EO→EC)", "Value": alpha_shift_Cz},
+        {"Metric":"Theta_Symmetry F3/F4 (EC)", "Value": theta_sym},
+        {"Metric":"Alpha_Symmetry F3/F4 (EC)", "Value": alpha_sym},
+        {"Metric":"Beta(13–21) Symmetry F3/F4 (EC)", "Value": beta_sym},
+        {"Metric":"Peak Alpha O1 (EC) [Hz]", "Value": paf_o1_ec},
+        {"Metric":"Peak Alpha Cz (EC) [Hz]", "Value": paf_cz_ec},
+        {"Metric":"Peak Alpha F3 (EC) [Hz]", "Value": paf_f3_ec},
+        {"Metric":"Peak Alpha F4 (EC) [Hz]", "Value": paf_f4_ec},
+    ])
     st.dataframe(derived_df, use_container_width=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
-# KPI tiles
 with tab_metrics:
     c1, c2, c3, c4 = st.columns(4)
     with c1:
@@ -709,8 +737,9 @@ with tab_metrics:
                     .format("n/a" if alpha_shift_O1 is None or not np.isfinite(alpha_shift_O1) else f"{alpha_shift_O1:.1f}%"),
                     unsafe_allow_html=True)
     with c3:
+        tbr_ec = get_val("O1","EyesClosed","TBR")
         st.markdown("<div class='kpi'><div class='label'>TBR O1 (EC)</div><div class='value'>{}</div></div>"
-                    .format("n/a" if tbr_o1_ec is None or not np.isfinite(tbr_o1_ec) else f"{tbr_o1_ec:.2f}"),
+                    .format("n/a" if tbr_ec is None or not np.isfinite(tbr_ec) else f"{tbr_ec:.2f}"),
                     unsafe_allow_html=True)
     with c4:
         st.markdown("<div class='kpi'><div class='label'>Frontal TBR Symmetry</div><div class='value'>{}</div></div>"
@@ -718,7 +747,7 @@ with tab_metrics:
                     unsafe_allow_html=True)
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 4) QC TAB
+# 5) QC TAB
 # ──────────────────────────────────────────────────────────────────────────────
 with tab_qc:
     st.markdown('<div class="app-card"><div class="card-title">🧪 Artifact quality control</div>', unsafe_allow_html=True)
@@ -732,30 +761,8 @@ with tab_qc:
     st.markdown('</div>', unsafe_allow_html=True)
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 5) DIALS
+# 6) DIALS (always a value)
 # ──────────────────────────────────────────────────────────────────────────────
-sleep_score = mean_finite([
-    None if alpha_shift_O1 is None else score_range(alpha_shift_O1, 50.0, 70.0),  # method stays as explanatory target
-    None if tbr_shift_O1   is None else score_shift(tbr_shift_O1),
-])
-emotional_score = mean_finite([
-    None if beta_sym        is None else score_sym1(beta_sym, SYM_TOL),
-    None if alpha_sym       is None else score_sym1(alpha_sym, SYM_TOL),
-    None if frontal_tbr_sym is None else score_sym1(frontal_tbr_sym, 0.20),
-])
-cognitive_score = mean_finite([
-    None if tbr_cz_eo       is None else score_range(tbr_cz_eo, 1.8, 2.2),
-    None if tlb_cz_ec       is None else score_range(tlb_cz_ec, 1.6, 2.4),
-    None if frontal_tbr_avg is None else score_range(frontal_tbr_avg, 1.8, 2.2),
-])
-stress_score = np.nan if all(v is None for v in [
-    beta_sym, frontal_tbr_avg, alpha_shift_Cz
-]) else 1.0 - mean_finite([
-    None if beta_sym        is None else score_sym1(beta_sym, SYM_TOL),
-    None if frontal_tbr_avg is None else score_range(frontal_tbr_avg, 1.8, 2.2),
-    None if alpha_shift_Cz  is None else score_range(alpha_shift_Cz, 50.0, 70.0),
-])
-
 with tab_dials:
     st.markdown('<div class="app-card"><div class="card-title">🧭 Dials</div>', unsafe_allow_html=True)
     c1, c2 = st.columns(2)
@@ -768,48 +775,58 @@ with tab_dials:
     if SHOW_DIAL_DEBUG:
         with st.expander("See dial component details", expanded=False):
             st.write({
-                "Sleep": {"alpha_shift_O1%": alpha_shift_O1, "tbr_shift_O1%": tbr_shift_O1},
-                "Cognitive": {"TBR_Cz_EO": tbr_cz_eo, "Theta/LowBeta_Cz_EC": tlb_cz_ec, "Frontal_TBR_avg_EC": frontal_tbr_avg},
-                "Emotional": {"Beta_sym_F3/F4": beta_sym, "Alpha_sym_F3/F4": alpha_sym, "TBR_sym_F3/F4": frontal_tbr_sym}
+                "Sleep": {"alpha_shift_O1%": alpha_shift_O1, "alpha_score": sleep_alpha_score,
+                          "tbr_shift_O1%": tbr_shift_O1, "tbr_shift_score": sleep_tbr_shift},
+                "Cognitive": {"TBR_Cz_EO": tbr_cz_eo, "score": cog_tbr_cz,
+                              "Theta/LowBeta_Cz_EC": tlb_cz_ec, "score2": cog_tlb_cz,
+                              "Frontal_TBR_avg_or_CzEO": frontal_tbr_avg, "score3": cog_tbr_avg},
+                "Emotional": {"Beta_sym_F3/F4": beta_sym, "score": emo_beta,
+                              "Alpha_sym_F3/F4": alpha_sym, "score2": emo_alpha,
+                              "TBR_sym_F3/F4": frontal_tbr_sym, "score3": emo_tbrsym},
+                "Stress/Trauma": {"reg_sym_beta": reg_sym_beta, "reg_cog_mid": reg_cog_mid,
+                                  "reg_alpha_cz": reg_alpha_cz, "regulation": regulation}
             })
     st.markdown('</div>', unsafe_allow_html=True)
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 6) SLIDERS
+# 7) SLIDERS (badges wired with robust scoring)
 # ──────────────────────────────────────────────────────────────────────────────
 with tab_sliders:
     st.markdown('<div class="app-card"><div class="card-title">🎚️ Sliders</div>', unsafe_allow_html=True)
     region = st.radio("Region", ["Posterior","Central","Anterior","Symmetry"], index=0, horizontal=True)
 
     def posterior():
-        # Alpha Shift O1 (EO→EC): up to 200% green, above 200% red; axis extended to 300%
         ui_slider_row("Alpha Shift O1 (EO → EC)", alpha_shift_O1, -100, 300, unit="%",
                       green=[(-100,200)], yellow=[], red=[(200,300)],
                       ticks=[-100,0,200,300],
-                      key="alpha_shift_o1", show_note=ENABLE_NOTES, show_badge=DISPLAY_INDICES)
+                      key="alpha_shift_o1", show_note=ENABLE_NOTES, show_badge=DISPLAY_INDICES,
+                      score01=sleep_alpha_score)
 
         ui_slider_row("Peak Alpha O1 (EC)", paf_o1_ec, 7, 13, unit=" Hz",
                       green=[(9.5,13.0)], yellow=[(9.0,9.5)], red=[(7.0,9.0)], ticks=[7,9.5,13],
-                      key="paf_o1_ec", show_note=ENABLE_NOTES, show_badge=DISPLAY_INDICES)
+                      key="paf_o1_ec", show_note=ENABLE_NOTES, show_badge=DISPLAY_INDICES,
+                      score01=None)
 
         ui_slider_row("TBR Shift O1 (EO → EC)", tbr_shift_O1, -100, 100, unit="%",
                       green=[(0,100)], yellow=[(-25,0)], red=[(-100,-25)], ticks=[-100,-25,0,100],
-                      key="tbr_shift_o1", show_note=ENABLE_NOTES, show_badge=DISPLAY_INDICES)
+                      key="tbr_shift_o1", show_note=ENABLE_NOTES, show_badge=DISPLAY_INDICES,
+                      score01=sleep_tbr_shift)
 
         ui_slider_row("TBR O1 (EO)", tbr_o1_eo, 0, 5,
                       green=[(1.2,2.7)], yellow=[(0.9,1.2),(2.7,3.0)], red=[(0.0,0.9),(3.0,5.0)],
-                      ticks=[0,0.9,1.2,2.7,3.0,5.0], key="tbr_o1_eo", show_note=ENABLE_NOTES, show_badge=DISPLAY_INDICES)
+                      ticks=[0,0.9,1.2,2.7,3.0,5.0], key="tbr_o1_eo",
+                      show_note=ENABLE_NOTES, show_badge=DISPLAY_INDICES)
 
         ui_slider_row("TBR O1 (EC)", tbr_o1_ec, 0, 5,
                       green=[(1.2,2.7)], yellow=[(0.9,1.2),(2.7,3.0)], red=[(0.0,0.9),(3.0,5.0)],
-                      ticks=[0,0.9,1.2,2.7,3.0,5.0], key="tbr_o1_ec", show_note=ENABLE_NOTES, show_badge=DISPLAY_INDICES)
+                      ticks=[0,0.9,1.2,2.7,3.0,5.0], key="tbr_o1_ec",
+                      show_note=ENABLE_NOTES, show_badge=DISPLAY_INDICES)
 
     def central():
-        # Alpha Shift Cz (EO→EC): same visual rule as O1
         ui_slider_row("Alpha Shift Cz (EO → EC)", alpha_shift_Cz, -100, 300, unit="%",
-                      green=[(-100,200)], yellow=[], red=[(200,300)],
-                      ticks=[-100,0,200,300],
-                      key="alpha_shift_cz", show_note=ENABLE_NOTES, show_badge=DISPLAY_INDICES)
+                      green=[(-100,200)], yellow=[], red=[(200,300)], ticks=[-100,0,200,300],
+                      key="alpha_shift_cz", show_note=ENABLE_NOTES, show_badge=DISPLAY_INDICES,
+                      score01=reg_alpha_cz)
 
         ui_slider_row("Peak Alpha Cz (EC)", paf_cz_ec, 7, 13, unit=" Hz",
                       green=[(9.5,13.0)], yellow=[(9.0,9.5)], red=[(7.0,9.0)], ticks=[7,9.5,13],
@@ -817,77 +834,77 @@ with tab_sliders:
 
         ui_slider_row("TBR Cz (EO)", tbr_cz_eo, 0, 5,
                       green=[(1.8,2.2)], yellow=[(1.6,1.8),(2.2,2.4)], red=[(0.0,1.6),(2.4,5.0)],
-                      ticks=[0,1.6,1.8,2.2,2.4,5.0], key="tbr_cz_eo", show_note=ENABLE_NOTES, show_badge=DISPLAY_INDICES)
+                      ticks=[0,1.6,1.8,2.2,2.4,5.0], key="tbr_cz_eo",
+                      show_note=ENABLE_NOTES, show_badge=DISPLAY_INDICES, score01=cog_tbr_cz)
 
         ui_slider_row("Theta/Low-Beta Cz (EC)", tlb_cz_ec, 0.5, 3.5,
                       green=[(1.6,2.4)], yellow=[(1.4,1.6),(2.4,2.6)], red=[(0.5,1.4),(2.6,3.5)],
-                      ticks=[0.5,1.6,2.4,3.5], key="tlb_cz_ec", show_note=ENABLE_NOTES, show_badge=DISPLAY_INDICES)
+                      ticks=[0.5,1.6,2.4,3.5], key="tlb_cz_ec",
+                      show_note=ENABLE_NOTES, show_badge=DISPLAY_INDICES, score01=cog_tlb_cz)
 
     def anterior():
-        for ch in ["F3","F4"]:
-            ta     = get_val(ch, "EyesClosed", "ThetaAlpha")
-            tbr    = get_val(ch, "EyesClosed", "TBR")
-            beta_hb = get_val(ch, "EyesClosed", "BetaOverHiBeta")
-            paf    = paf_f3_ec if ch=="F3" else paf_f4_ec
+        for ch, paf, tbr in [("F3", paf_f3_ec, f3_tbr_ec), ("F4", paf_f4_ec, f4_tbr_ec)]:
+            ta = get_val(ch, "EyesClosed", "ThetaAlpha")
+            # score proxy for TA: prefer ≥1.2
+            ta_score = score_in_window(ta, 1.2, 3.0, 0.2, 3.0, default=0.5) if ch=="F3" else None
 
-            st.markdown(f"<div class='badge'>Frontal {ch} (EC)</div>", unsafe_allow_html=True)
-
-            # Theta/Alpha EC:
-            # - For F3: red 0–1, orange 1–1.2, green >1.2
-            # - For F4: keep default neutral (if desired change, mirror F3 rule)
-            if ch == "F3":
-                ui_slider_row(f"Theta/Alpha {ch} (EC)", ta, 0.2, 3.0,
-                              green=[(1.2,3.0)], yellow=[(1.0,1.2)], red=[(0.2,1.0)],
-                              ticks=[0.2,1.0,1.2,3.0],
-                              key=f"ta_{ch}_ec", show_note=ENABLE_NOTES, show_badge=DISPLAY_INDICES)
-            else:
-                ui_slider_row(f"Theta/Alpha {ch} (EC)", ta, 0.2, 3.0,
-                              ticks=[0.2,1.0,3.0],
-                              key=f"ta_{ch}_ec", show_note=ENABLE_NOTES, show_badge=DISPLAY_INDICES)
+            ui_slider_row(f"Theta/Alpha {ch} (EC)", ta, 0.2, 3.0,
+                          green=[(1.2,3.0)] if ch=="F3" else [],
+                          yellow=[(1.0,1.2)] if ch=="F3" else [],
+                          red=[(0.2,1.0)] if ch=="F3" else [],
+                          ticks=[0.2,1.0,1.2,3.0], key=f"ta_{ch}_ec",
+                          show_note=ENABLE_NOTES, show_badge=DISPLAY_INDICES, score01=ta_score)
 
             ui_slider_row(f"Peak Alpha {ch} (EC)", paf, 7, 13, unit=" Hz",
                           green=[(9.5,13.0)], yellow=[(9.0,9.5)], red=[(7.0,9.0)], ticks=[7,9.5,13],
                           key=f"paf_{ch}_ec", show_note=ENABLE_NOTES, show_badge=DISPLAY_INDICES)
 
+            tbr_score = score_in_window(tbr, 1.8, 2.2, 0.5, 4.0, default=0.5)
             ui_slider_row(f"TBR {ch} (EC)", tbr, 0.5, 4.0,
                           green=[(1.8,2.2)], yellow=[(1.6,1.8),(2.2,2.4)], red=[(0.5,1.6),(2.4,4.0)],
                           ticks=[0.5,1.6,1.8,2.2,2.4,4.0], key=f"tbr_{ch}_ec",
-                          show_note=ENABLE_NOTES, show_badge=DISPLAY_INDICES)
+                          show_note=ENABLE_NOTES, show_badge=DISPLAY_INDICES, score01=tbr_score)
 
-            # NEW: BetaOverHiBeta with green zone 0.4–0.6
+            beta_hb = get_val(ch, "EyesClosed", "BetaOverHiBeta")
+            beta_hb_score = score_in_window(beta_hb, 0.4, 0.6, 0.1, 2.0, default=0.5)
             ui_slider_row(f"Beta/HiBeta {ch} (EC)", beta_hb, 0.1, 2.0,
                           green=[(0.4,0.6)], yellow=[(0.3,0.4),(0.6,0.8)], red=[(0.1,0.3),(0.8,2.0)],
                           ticks=[0.1,0.4,0.5,0.6,2.0], key=f"beta_over_hibeta_{ch}_ec",
-                          show_note=ENABLE_NOTES, show_badge=DISPLAY_INDICES)
+                          show_note=ENABLE_NOTES, show_badge=DISPLAY_INDICES, score01=beta_hb_score)
 
     def symmetry_sliders():
+        th_s = score_symmetry_ratio(theta_sym, SYM_TOL, default=0.5)
+        al_s = score_symmetry_ratio(alpha_sym, SYM_TOL, default=0.5)
+        be_s = score_symmetry_ratio(beta_sym,  SYM_TOL, default=0.5)
+
         ui_slider_row("Theta Symmetry F3/F4 (EC)", theta_sym, 0.4, 1.6,
                       green=[(1.0-SYM_TOL, 1.0+SYM_TOL)],
                       yellow=[(1.0-1.25*SYM_TOL, 1.0-SYM_TOL), (1.0+SYM_TOL, 1.0+1.25*SYM_TOL)],
                       red=[(0.4, 1.0-1.25*SYM_TOL), (1.0+1.25*SYM_TOL, 1.6)],
                       ticks=[0.4, 1.0-SYM_TOL, 1.0, 1.0+SYM_TOL, 1.6],
-                      key="theta_sym", show_note=ENABLE_NOTES, show_badge=DISPLAY_INDICES)
+                      key="theta_sym", show_note=ENABLE_NOTES, show_badge=DISPLAY_INDICES, score01=th_s)
         ui_slider_row("Alpha Symmetry F3/F4 (EC)", alpha_sym, 0.4, 1.6,
                       green=[(1.0-SYM_TOL, 1.0+SYM_TOL)],
                       yellow=[(1.0-1.25*SYM_TOL, 1.0-SYM_TOL), (1.0+SYM_TOL, 1.0+1.25*SYM_TOL)],
                       red=[(0.4, 1.0-1.25*SYM_TOL), (1.0+1.25*SYM_TOL, 1.6)],
                       ticks=[0.4, 1.0-SYM_TOL, 1.0, 1.0+SYM_TOL, 1.6],
-                      key="alpha_sym", show_note=ENABLE_NOTES, show_badge=DISPLAY_INDICES)
+                      key="alpha_sym", show_note=ENABLE_NOTES, show_badge=DISPLAY_INDICES, score01=al_s)
         ui_slider_row("Beta (13–21) Symmetry F3/F4 (EC)", beta_sym, 0.4, 1.6,
                       green=[(1.0-SYM_TOL, 1.0+SYM_TOL)],
                       yellow=[(1.0-1.25*SYM_TOL, 1.0-SYM_TOL), (1.0+SYM_TOL, 1.0+1.25*SYM_TOL)],
                       red=[(0.4, 1.0-1.25*SYM_TOL), (1.0+1.25*SYM_TOL, 1.6)],
                       ticks=[0.4, 1.0-SYM_TOL, 1.0, 1.0+SYM_TOL, 1.6],
-                      key="beta_sym", show_note=ENABLE_NOTES, show_badge=DISPLAY_INDICES)
+                      key="beta_sym", show_note=ENABLE_NOTES, show_badge=DISPLAY_INDICES, score01=be_s)
 
     if region == "Posterior": posterior()
     elif region == "Central": central()
     elif region == "Anterior": anterior()
     else: symmetry_sliders()
+
     st.markdown('</div>', unsafe_allow_html=True)
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 7) PSD VIEWER
+# 8) PSD VIEWER
 # ──────────────────────────────────────────────────────────────────────────────
 with tab_psd:
     st.markdown('<div class="app-card"><div class="card-title">📈 Power Spectral Density</div>', unsafe_allow_html=True)
@@ -909,24 +926,19 @@ with tab_psd:
     st.markdown('</div>', unsafe_allow_html=True)
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 8) EXPORT (CSV + PDF with captions & aligned sliders)
+# 9) EXPORT (CSV + PDF with dials, PSDs, sliders)
 # ──────────────────────────────────────────────────────────────────────────────
 with tab_export:
     st.markdown('<div class="app-card"><div class="card-title">⬇️ Export all metrics</div>', unsafe_allow_html=True)
-
-    c0, c1 = st.columns([0.7, 0.3])
-    with c0:
-        export_name_input = st.text_input("Export name", value=st.session_state.get("export_name", "neurobiqs_report"))
-        st.session_state["export_name"] = export_name_input
-    with c1:
-        append_ts = st.checkbox("Append date & time", value=True)
-
+    export_name_input = st.text_input("Export name", value=st.session_state.get("export_name", "neurobiqs_report"))
+    st.session_state["export_name"] = export_name_input
+    append_ts = st.checkbox("Append date & time", value=True)
     base = make_export_basename(export_name_input)
-    if append_ts:
-        base = f"{base}_{datetime.now().strftime('%Y%m%d_%H%M')}"
+    if append_ts: base = f"{base}_{datetime.now().strftime('%Y%m%d_%H%M')}"
     csv_filename = f"{base}.csv"
     pdf_filename = f"{base}.pdf"
 
+    # Assemble CSV dataframe
     out = bands_df.copy()
     out["AlphaShift_O1_pct"] = alpha_shift_O1
     out["TBR_Shift_O1_pct"]  = tbr_shift_O1
@@ -938,16 +950,10 @@ with tab_export:
     out["PeakAlpha_Cz_EC_Hz"] = paf_cz_ec
     out["PeakAlpha_F3_EC_Hz"] = paf_f3_ec
     out["PeakAlpha_F4_EC_Hz"] = paf_f4_ec
-    # NEW: include BetaOverHiBeta for convenience
-    out["BetaOverHiBeta_F3_EC"] = get_val("F3","EyesClosed","BetaOverHiBeta")
-    out["BetaOverHiBeta_F4_EC"] = get_val("F4","EyesClosed","BetaOverHiBeta")
-
     out["Dial_Emotional_0_1"] = emotional_score
     out["Dial_Sleep_0_1"]     = sleep_score
     out["Dial_Cognitive_0_1"] = cognitive_score
     out["Dial_StressTrauma_0_1_higher_worse"] = stress_score
-
-    # Merge QC into export
     if not qc_df.empty:
         out = out.merge(
             qc_df[["file","epochs_total","epochs_good","clean_pct","rej_amp","rej_blink","rej_muscle","rej_flat","used_original"]],
@@ -963,6 +969,7 @@ with tab_export:
         PDF_HAS_REPORTLAB = True
     except Exception:
         PDF_HAS_REPORTLAB = False
+
     try:
         _ = go.Figure().to_image(format="png")  # kaleido probe
         PDF_HAS_KALEIDO = True
@@ -975,6 +982,7 @@ with tab_export:
     )
 
     def build_pdf_bytes() -> Optional[bytes]:
+        """Build a multi-section PDF using ReportLab + Plotly (kaleido)."""
         if not PDF_HAS_REPORTLAB:
             st.info("Install ReportLab to enable PDF:  pip install reportlab")
             return None
@@ -987,7 +995,7 @@ with tab_export:
         from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
         from reportlab.lib import colors
 
-        # helper: df -> wrapped table
+        # Small helper: dataframe -> ReportLab Table with wordwrap + alignment
         def pdf_table_from_df(
             df: pd.DataFrame,
             page_width: float,
@@ -1022,11 +1030,11 @@ with tab_export:
             t.setStyle(TableStyle(ts))
             return t
 
-        # Build document
         buf = io.BytesIO()
-        doc = SimpleDocTemplate(buf, pagesize=A4,
-                                topMargin=2.0*cm, bottomMargin=2.0*cm,
-                                leftMargin=1.6*cm, rightMargin=1.6*cm)
+        doc = SimpleDocTemplate(
+            buf, pagesize=A4,
+            topMargin=2.0*cm, bottomMargin=2.0*cm, leftMargin=1.6*cm, rightMargin=1.6*cm
+        )
         styles = getSampleStyleSheet()
         H  = styles["Heading1"]; H.fontSize = 16
         H2 = styles["Heading2"]; H2.spaceBefore = 10; H2.fontSize = 13
@@ -1038,6 +1046,7 @@ with tab_export:
         elems.append(Paragraph(f"v{APP_VERSION} · Exported {datetime.now().strftime('%Y-%m-%d %H:%M')}", P))
         elems.append(Spacer(1, 8))
 
+        # Processing summary line
         elems.append(Paragraph(
             f"Sampling: fs={'override ' + str(int(FS_OVERRIDE)) + ' Hz' if FS_OVERRIDE > 0 else 'auto-estimated'}, "
             f"Welch: nperseg={int(N_PERSEG)}, noverlap={int(N_OVERLAP)}, "
@@ -1047,13 +1056,17 @@ with tab_export:
         # Dial scores table
         dial_rows = [
             ["Dial", "Score (0–1)", "Score %"],
-            ["Emotional", f"{emotional_score:.2f}" if np.isfinite(emotional_score) else "n/a",
+            ["Emotional",
+             f"{emotional_score:.2f}" if np.isfinite(emotional_score) else "n/a",
              f"{100*emotional_score:.1f}%" if np.isfinite(emotional_score) else "n/a"],
-            ["Sleep", f"{sleep_score:.2f}" if np.isfinite(sleep_score) else "n/a",
+            ["Sleep",
+             f"{sleep_score:.2f}" if np.isfinite(sleep_score) else "n/a",
              f"{100*sleep_score:.1f}%" if np.isfinite(sleep_score) else "n/a"],
-            ["Cognitive", f"{cognitive_score:.2f}" if np.isfinite(cognitive_score) else "n/a",
+            ["Cognitive",
+             f"{cognitive_score:.2f}" if np.isfinite(cognitive_score) else "n/a",
              f"{100*cognitive_score:.1f}%" if np.isfinite(cognitive_score) else "n/a"],
-            ["Stress/Trauma", f"{stress_score:.2f}" if np.isfinite(stress_score) else "n/a",
+            ["Stress/Trauma",
+             f"{stress_score:.2f}" if np.isfinite(stress_score) else "n/a",
              f"{100*stress_score:.1f}%" if np.isfinite(stress_score) else "n/a"],
         ]
         dial_tbl = Table(dial_rows, hAlign="LEFT",
@@ -1069,26 +1082,18 @@ with tab_export:
         elems.append(dial_tbl)
         elems.append(Spacer(1, 8))
 
-        # Dial plots (with titles) — slim
-        try:
-            _ = go.Figure().to_image(format="png")
-            HAVE_KALEIDO = True
-        except Exception:
-            HAVE_KALEIDO = False
-
+        # Dial plots
+        HAVE_KALEIDO = PDF_HAS_KALEIDO
         if HAVE_KALEIDO:
             def fig_to_img(fig, width_pts: float):
                 png = fig.to_image(format="png", scale=2)
-                img = Image(io.BytesIO(png))
-                img._restrictSize(width_pts, 10000)
-                return img
+                img = Image(io.BytesIO(png)); img._restrictSize(width_pts, 10000); return img
 
             dials = [
-                gauge_figure("Emotional", emotional_score, height=140, width=160, thickness=0.16, title_size=11),
-                gauge_figure("Sleep",      sleep_score,     height=140, width=160, thickness=0.16, title_size=11),
-                gauge_figure("Cognitive",  cognitive_score, height=140, width=160, thickness=0.16, title_size=11),
-                gauge_figure("Stress/Trauma", stress_score, invert=True,
-                             height=140, width=160, thickness=0.16, title_size=11),
+                gauge_figure("Emotional", emotional_score),
+                gauge_figure("Sleep",      sleep_score),
+                gauge_figure("Cognitive",  cognitive_score),
+                gauge_figure("Stress/Trauma", stress_score, invert=True),
             ]
             col_w = page_width/3 - 4
             imgs = [fig_to_img(f, col_w) for f in dials]
@@ -1099,22 +1104,36 @@ with tab_export:
         else:
             elems.append(Paragraph("Dial plots unavailable (install kaleido to embed).", P))
 
-        # Derived metrics table
+        # Derived metrics table (same as Metrics tab)
+        derived_df_pdf = pd.DataFrame([
+            {"Metric":"AlphaShift_O1_pct (EO→EC)", "Value": alpha_shift_O1},
+            {"Metric":"TBR_Shift_O1_pct (EO→EC)", "Value": tbr_shift_O1},
+            {"Metric":"AlphaShift_Cz_pct (EO→EC)", "Value": alpha_shift_Cz},
+            {"Metric":"Theta_Symmetry F3/F4 (EC)", "Value": theta_sym},
+            {"Metric":"Alpha_Symmetry F3/F4 (EC)", "Value": alpha_sym},
+            {"Metric":"Beta(13–21) Symmetry F3/F4 (EC)", "Value": beta_sym},
+            {"Metric":"Peak Alpha O1 (EC) [Hz]", "Value": paf_o1_ec},
+            {"Metric":"Peak Alpha Cz (EC) [Hz]", "Value": paf_cz_ec},
+            {"Metric":"Peak Alpha F3 (EC) [Hz]", "Value": paf_f3_ec},
+            {"Metric":"Peak Alpha F4 (EC) [Hz]", "Value": paf_f4_ec},
+        ])
         elems.append(Paragraph("Derived metrics", H2))
-        elems.append(pdf_table_from_df(pd.DataFrame(derived_df), page_width, col_ratios=[0.65, 0.30], font_size=9))
+        elems.append(pdf_table_from_df(derived_df_pdf, page_width, col_ratios=[0.65, 0.30], font_size=9))
         elems.append(Spacer(1, 6))
 
         # QC table
         if not qc_df.empty:
             elems.append(Paragraph("Artifact QC (per file)", H2))
             qc_cols = ["file","channel","condition","epochs_total","epochs_good","clean_pct","rej_amp","rej_blink","rej_muscle","rej_flat","used_original"]
-            qct = pdf_table_from_df(qc_df[qc_cols], page_width, font_size=8)
-            elems.append(qct)
+            elems.append(pdf_table_from_df(qc_df[qc_cols], page_width, font_size=8))
             elems.append(Spacer(1, 6))
 
         # Band powers (slim columns)
         elems.append(Paragraph("Band powers & core ratios", H2))
-        slim = bands_df[["file","channel","condition","Theta","Alpha","Beta","LowBeta","HiBeta","TBR","ThetaLowBeta","ThetaAlpha","BetaOverHiBeta"]].copy()
+        slim = bands_df[[
+            "file","channel","condition","Theta","Alpha","Beta","LowBeta","HiBeta",
+            "TBR","ThetaLowBeta","ThetaAlpha","BetaOverHiBeta"
+        ]].copy()
         elems.append(pdf_table_from_df(
             slim, page_width,
             col_ratios=[0.33, 0.08, 0.10, 0.11, 0.11, 0.11, 0.11, 0.11, 0.10, 0.12, 0.12, 0.12],
@@ -1122,7 +1141,7 @@ with tab_export:
         ))
         elems.append(PageBreak())
 
-        # PSD overlays
+        # PSD overlays (EO vs EC) per channel
         if HAVE_KALEIDO:
             def psd_overlay_fig(channel: str):
                 fig = go.Figure()
@@ -1158,7 +1177,7 @@ with tab_export:
         else:
             elems.append(Paragraph("PSD plots unavailable (install kaleido to embed).", P))
 
-        # Slider snapshots — updated spec (no Alpha Flexibility; new color rules)
+        # Slider snapshots (key ClinicalQ sliders)
         if HAVE_KALEIDO:
             elems.append(PageBreak())
             elems.append(Paragraph("Slider snapshots", H2))
@@ -1168,11 +1187,13 @@ with tab_export:
             cap_style = ParagraphStyle("cap", fontSize=9, leading=10, alignment=1)
 
             def sfig(title, value, lo, hi, **kw):
-                return build_slider_figure(title, value, lo, hi,
-                                           height=78, bar_thickness=0.12, marker_size=8, **kw)
+                return build_slider_figure(
+                    title, value, lo, hi,
+                    height=78, bar_thickness=0.12, marker_size=8, **kw
+                )
 
             specs: List[Tuple[str, go.Figure]] = []
-            # Posterior (updated alpha shift range/colors)
+            # Posterior
             specs += [
                 ("Alpha Shift O1 (EO → EC)", sfig("Alpha Shift O1 (EO → EC)", alpha_shift_O1, -100, 300,
                                                   green=[(-100,200)], red=[(200,300)], ticks=[-100,0,200,300], unit="%")),
@@ -1189,7 +1210,7 @@ with tab_export:
                                      green=[(1.2,2.7)], yellow=[(0.9,1.2),(2.7,3.0)],
                                      red=[(0.0,0.9),(3.0,5.0)], ticks=[0,0.9,1.2,2.7,3.0,5.0])),
             ]
-            # Central (updated alpha shift range/colors)
+            # Central
             specs += [
                 ("Alpha Shift Cz (EO → EC)", sfig("Alpha Shift Cz (EO → EC)", alpha_shift_Cz, -100, 300,
                                                   green=[(-100,200)], red=[(200,300)], ticks=[-100,0,200,300], unit="%")),
@@ -1203,7 +1224,7 @@ with tab_export:
                                                 green=[(1.6,2.4)], yellow=[(1.4,1.6),(2.4,2.6)],
                                                 red=[(0.5,1.4),(2.6,3.5)], ticks=[0.5,1.6,2.4,3.5])),
             ]
-            # Anterior (F3/F4) with new TA(F3) colors and Beta/HiBeta sliders
+            # Anterior (F3/F4)
             specs += [
                 ("Theta/Alpha F3 (EC)", sfig("Theta/Alpha F3 (EC)", get_val("F3","EyesClosed","ThetaAlpha"), 0.2, 3.0,
                                              green=[(1.2,3.0)], yellow=[(1.0,1.2)], red=[(0.2,1.0)],
@@ -1230,7 +1251,7 @@ with tab_export:
                                              red=[(0.1,0.3),(0.8,2.0)], ticks=[0.1,0.4,0.5,0.6,2.0])),
             ]
 
-            # render 2 per row with captions
+            # Render two per row with caption under each
             row_cells = []
             for title, fig in specs:
                 png = fig.to_image(format="png", scale=2)
@@ -1256,18 +1277,15 @@ with tab_export:
                     row_cells = []
             if row_cells:
                 elems.append(Table([row_cells], colWidths=[slider_img_w]))
-
-        # Footer note
+        # Footer
         elems.append(Spacer(1, 6))
-        elems.append(Paragraph(
-            f"Generated by {APP_NAME} v{APP_VERSION}.",
-            P
-        ))
+        elems.append(Paragraph(f"Generated by {APP_NAME} v{APP_VERSION}.", P))
 
-        # build
+        # Build the PDF
         doc.build(elems)
         return buf.getvalue()
 
+    # Try building the PDF and expose a download button if it succeeded
     try:
         pdf_bytes = build_pdf_bytes()
         if pdf_bytes:
